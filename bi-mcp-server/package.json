@@ -1,0 +1,56 @@
+{
+  "name": "bi-mcp-server",
+  "version": "0.1.0",
+  "description": "Ultra-light MCP server for Claude Desktop with < 25ms p95 latency",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "start:dev": "tsx watch src/index.ts",
+    "start:test": "NODE_ENV=test tsx src/index.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "bench:context": "tsx src/benchmarks/context.bench.ts",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "security:scan": "npm audit && eslint --plugin security src"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "snowflake-sdk": "^1.9.0",
+    "ioredis": "^5.3.2",
+    "lru-cache": "^10.0.1",
+    "uuid": "^9.0.1",
+    "zod": "^3.22.4",
+    "pino": "^8.16.1",
+    "pino-pretty": "^10.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.10",
+    "@types/uuid": "^9.0.6",
+    "@types/jest": "^29.5.7",
+    "@typescript-eslint/eslint-plugin": "^6.9.1",
+    "@typescript-eslint/parser": "^6.9.1",
+    "eslint": "^8.52.0",
+    "eslint-plugin-security": "^1.7.1",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "tsx": "^3.14.0",
+    "typescript": "^5.2.2",
+    "autocannon": "^7.14.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "claude",
+    "snowflake",
+    "activityschema",
+    "bi"
+  ],
+  "author": "",
+  "license": "MIT"
+}
