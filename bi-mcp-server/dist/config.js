@@ -1,13 +1,13 @@
 import { z } from 'zod';
 const configSchema = z.object({
     snowflake: z.object({
-        account: z.string().default('FBC56289.us-east-1.aws'),
+        account: z.string().default('yshmxno-fbc56289'),
         username: z.string(),
         password: z.string(),
-        warehouse: z.string().default('COMPUTE_XS'),
-        database: z.string().default('ANALYTICS'),
-        schema: z.string().default('ACTIVITY'),
-        role: z.string().default('ACCOUNTADMIN'),
+        warehouse: z.string().default('COMPUTE_WH'),
+        database: z.string().default('CLAUDE_LOGS'),
+        schema: z.string().default('ACTIVITIES'),
+        role: z.string().default('CLAUDE_DESKTOP_ROLE'),
         queryTag: z.string().default('cdesk'),
     }),
     redis: z.object({
@@ -40,7 +40,7 @@ export function loadConfig() {
     return configSchema.parse({
         snowflake: {
             account: process.env.SNOWFLAKE_ACCOUNT,
-            username: process.env.SNOWFLAKE_USER || 'cklose2000',
+            username: process.env.SNOWFLAKE_USERNAME || process.env.SNOWFLAKE_USER || 'CLAUDE_DESKTOP1',
             password: process.env.SNOWFLAKE_PASSWORD || '',
             warehouse: process.env.SNOWFLAKE_WAREHOUSE,
             database: process.env.SNOWFLAKE_DATABASE,
