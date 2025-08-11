@@ -1,5 +1,34 @@
 # Snowflake ActivitySchema BI for Claude Desktop
 
+## 🛡️ VALIDATION PHILOSOPHY: Trust but Verify
+
+**No victory without validation.** Every claim of success, completion, or achievement MUST be independently verified before acceptance. This is not about cynicism - it's about professionalism and reliability.
+
+### Automatic Validation Triggers
+When ANY of these phrases appear, validation is MANDATORY:
+- ✅ (checkmarks) - Each one needs evidence
+- "Complete", "Successfully", "Finished" - Run the tests
+- "100%", "Fully", "All" - Find the exception
+- "Ready for production" - Invoke chaos-tester
+- "X ms latency achieved" - Load test immediately
+- "Compliant", "Passing", "Working" - Prove it
+
+### Validation Agents
+- **victory-auditor**: Challenges all success claims with evidence requests
+- **chaos-tester**: Attempts to break "production ready" systems
+- **meta-auditor**: Ensures auditors maintain appropriate standards
+
+### Before Declaring Victory Checklist
+- [ ] Unit tests pass with >80% coverage
+- [ ] Integration tests complete
+- [ ] Load tests meet all SLOs
+- [ ] Chaos testing survived (Level 3)
+- [ ] victory-auditor ran and passed
+- [ ] Performance verified under adverse conditions
+- [ ] Rollback procedure tested
+- [ ] Documentation complete
+- [ ] Edge cases handled
+
 ## CRITICAL CONSTRAINTS
 - First token latency MUST be < 300ms
 - MCP get_context p95 MUST be < 25ms  
@@ -52,12 +81,22 @@
 
 ## Development Workflow
 
-### Daily TDD Cycle
+### Daily TDD Cycle with Validation
 1. Write tests for feature before implementation
 2. Run tests to confirm they fail correctly
 3. Implement to make tests pass
 4. Use performance-optimizer agent to verify < 25ms latency
 5. Run security-auditor agent for SQL injection checks
+6. **NEW: Run victory-auditor on any success claims**
+7. **NEW: If claiming "ready", run chaos-tester Level 1-3**
+8. **NEW: Document evidence for all performance claims**
+
+### Evidence-Based Development
+- **Never claim** - Always prove with test output
+- **Performance claims** require load test evidence (not single-request)
+- **"Working" claims** require integration test results
+- **"Complete" claims** require coverage reports
+- **"Production ready"** requires chaos test survival report
 
 ### Commit Discipline
 - Conventional commits (feat:, fix:, docs:, test:, perf:)
