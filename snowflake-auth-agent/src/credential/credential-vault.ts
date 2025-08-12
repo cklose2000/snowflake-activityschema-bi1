@@ -5,7 +5,7 @@
  * with intelligent rotation and failover capabilities.
  */
 
-import { createCipher, createDecipher, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import pino from 'pino';
@@ -393,9 +393,11 @@ export class CredentialVault {
    * Encrypt data using AES-256-CBC
    */
   private encrypt(text: string): string {
-    const salt = randomBytes(16);
     const iv = randomBytes(16);
-    const cipher = createCipher('aes-256-cbc', this.encryptionKey);
+    const salt = randomBytes(32);
+    const key = scryptSync(this.encryptionKey, salt, 32);
+    
+    const cipher = createCipheriv('aes-256-cbc', key, iv);
     
     let encrypted = cipher.update(text, 'utf8', 'hex');
     encrypted += cipher.final('hex');
@@ -416,7 +418,9 @@ export class CredentialVault {
     const iv = Buffer.from(parts[1], 'hex');
     const encrypted = parts[2];
     
-    const decipher = createDecipher('aes-256-cbc', this.encryptionKey);
+    const key = scryptSync(this.encryptionKey, salt, 32);
+    const decipher = createDecipheriv('aes-256-cbc', key, iv);
+    
     let decrypted = decipher.update(encrypted, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     
