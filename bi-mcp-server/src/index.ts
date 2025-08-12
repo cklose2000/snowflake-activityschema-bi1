@@ -177,6 +177,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   const startTime = process.hrtime.bigint();
+  
+  // Log auth event for tool execution if using auth agent
+  const useAuthAgent = process.env.AUTH_AGENT_ENABLED === 'true' || process.env.AUTH_AGENT_ENABLED === '1';
+  if (useAuthAgent && snowflakeClient && 'logToolExecution' in snowflakeClient) {
+    // Log tool execution start (async, non-blocking)
+    (snowflakeClient as AuthEnabledSnowflakeClient).logToolExecution(name, 'start').catch(err => {
+      logger.warn({ error: err, tool: name }, 'Failed to log tool execution start');
+    });
+  }
 
   try {
     switch (name) {
@@ -203,6 +212,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
         
         recordMetric('logEvent', startTime);
+        
+        // Log tool success if using auth agent
+        if (useAuthAgent && snowflakeClient && 'logToolExecution' in snowflakeClient) {
+          (snowflakeClient as AuthEnabledSnowflakeClient).logToolExecution(name, 'success').catch(err => {
+            logger.warn({ error: err, tool: name }, 'Failed to log tool execution success');
+          });
+        }
         
         return {
           content: [
@@ -482,6 +498,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // Record error metric
     if (name in metrics) {
       (metrics as any)[name].errors++;
+    }
+    
+    // Log tool failure if using auth agent
+    if (useAuthAgent && snowflakeClient && 'logToolExecution' in snowflakeClient) {
+      (snowflakeClient as AuthEnabledSnowflakeClient).logToolExecution(name, 'failure', error.message).catch(err => {
+        logger.warn({ error: err, tool: name }, 'Failed to log tool execution failure');
+      });
     }
     
     return {

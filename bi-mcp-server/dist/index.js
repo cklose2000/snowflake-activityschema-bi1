@@ -157,6 +157,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     const startTime = process.hrtime.bigint();
+    // Log auth event for tool execution if using auth agent
+    const useAuthAgent = process.env.AUTH_AGENT_ENABLED === 'true' || process.env.AUTH_AGENT_ENABLED === '1';
+    if (useAuthAgent && snowflakeClient && 'logToolExecution' in snowflakeClient) {
+        // Log tool execution start (async, non-blocking)
+        snowflakeClient.logToolExecution(name, 'start').catch(err => {
+            logger.warn({ error: err, tool: name }, 'Failed to log tool execution start');
+        });
+    }
     try {
         switch (name) {
             case 'log_event': {
@@ -178,6 +186,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     query_tag: queryTag,
                 });
                 recordMetric('logEvent', startTime);
+                // Log tool success if using auth agent
+                if (useAuthAgent && snowflakeClient && 'logToolExecution' in snowflakeClient) {
+                    snowflakeClient.logToolExecution(name, 'success').catch(err => {
+                        logger.warn({ error: err, tool: name }, 'Failed to log tool execution success');
+                    });
+                }
                 return {
                     content: [
                         {
@@ -414,6 +428,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Record error metric
         if (name in metrics) {
             metrics[name].errors++;
+        }
+        // Log tool failure if using auth agent
+        if (useAuthAgent && snowflakeClient && 'logToolExecution' in snowflakeClient) {
+            snowflakeClient.logToolExecution(name, 'failure', error.message).catch(err => {
+                logger.warn({ error: err, tool: name }, 'Failed to log tool execution failure');
+            });
         }
         return {
             content: [

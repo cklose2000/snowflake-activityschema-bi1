@@ -76,59 +76,35 @@ export class CredentialVault {
    */
   async initialize(): Promise<void> {
     if (!existsSync(this.configPath)) {
-      logger.info('Creating default credential configuration');
+      logger.info('Creating credential configuration from environment');
+      
+      // Read multi-account configuration from environment
+      const accountNames = (process.env.SNOWFLAKE_ACCOUNTS || 'CLAUDE_DESKTOP1').split(',');
+      const passwords = (process.env.SNOWFLAKE_PASSWORDS || process.env.SNOWFLAKE_PASSWORD || 'Password123!').split(',');
+      const priorities = (process.env.SNOWFLAKE_ACCOUNT_PRIORITIES || '1,2,3').split(',').map(Number);
+      const maxFailures = (process.env.SNOWFLAKE_MAX_FAILURES || '3,3,2').split(',').map(Number);
+      const cooldownMs = (process.env.SNOWFLAKE_COOLDOWN_MS || '300000,300000,180000').split(',').map(Number);
+      
+      // Create account configurations
+      const accounts: AccountConfig[] = accountNames.map((username, index) => ({
+        username: username.trim(),
+        password: passwords[index] || passwords[0] || 'Password123!',
+        priority: priorities[index] || index + 1,
+        account: process.env.SNOWFLAKE_ACCOUNT || 'yshmxno-fbc56289',
+        role: process.env.SNOWFLAKE_ROLE || 'CLAUDE_DESKTOP_ROLE',
+        warehouse: process.env.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH',
+        database: process.env.SNOWFLAKE_DATABASE || 'CLAUDE_LOGS',
+        schema: process.env.SNOWFLAKE_SCHEMA || 'ACTIVITIES',
+        maxFailures: maxFailures[index] || 3,
+        cooldownMs: cooldownMs[index] || 300000,
+        maxConnections: index === 0 ? 15 : index === 1 ? 10 : 5,
+        isActive: true,
+        consecutiveFailures: 0,
+        inCooldown: false,
+      }));
       
       const defaultConfig: CredentialConfig = {
-        accounts: [
-          {
-            username: 'CLAUDE_DESKTOP1',
-            password: process.env.SNOWFLAKE_PASSWORD || 'Password123!',
-            priority: 1,
-            account: process.env.SNOWFLAKE_ACCOUNT || 'yshmxno-fbc56289',
-            role: process.env.SNOWFLAKE_ROLE || 'CLAUDE_DESKTOP_ROLE',
-            warehouse: process.env.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH',
-            database: process.env.SNOWFLAKE_DATABASE || 'CLAUDE_LOGS',
-            schema: process.env.SNOWFLAKE_SCHEMA || 'ACTIVITIES',
-            maxFailures: 3,
-            cooldownMs: 300000,
-            maxConnections: 15,
-            isActive: true,
-            consecutiveFailures: 0,
-            inCooldown: false,
-          },
-          {
-            username: 'CLAUDE_DESKTOP2',
-            password: process.env.SNOWFLAKE_PASSWORD || 'Password123!',
-            priority: 2,
-            account: process.env.SNOWFLAKE_ACCOUNT || 'yshmxno-fbc56289',
-            role: process.env.SNOWFLAKE_ROLE || 'CLAUDE_DESKTOP_ROLE',
-            warehouse: process.env.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH',
-            database: process.env.SNOWFLAKE_DATABASE || 'CLAUDE_LOGS',
-            schema: process.env.SNOWFLAKE_SCHEMA || 'ACTIVITIES',
-            maxFailures: 3,
-            cooldownMs: 300000,
-            maxConnections: 10,
-            isActive: true,
-            consecutiveFailures: 0,
-            inCooldown: false,
-          },
-          {
-            username: 'CLAUDE_DESKTOP_TEST',
-            password: process.env.SNOWFLAKE_PASSWORD || 'Password123!',
-            priority: 3,
-            account: process.env.SNOWFLAKE_ACCOUNT || 'yshmxno-fbc56289',
-            role: process.env.SNOWFLAKE_ROLE || 'CLAUDE_DESKTOP_ROLE',
-            warehouse: process.env.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH',
-            database: process.env.SNOWFLAKE_DATABASE || 'CLAUDE_LOGS',
-            schema: process.env.SNOWFLAKE_SCHEMA || 'ACTIVITIES',
-            maxFailures: 2,
-            cooldownMs: 180000,
-            maxConnections: 5,
-            isActive: true,
-            consecutiveFailures: 0,
-            inCooldown: false,
-          },
-        ],
+        accounts,
         encryption: {
           algorithm: 'aes-256-cbc',
           keyDerivation: 'pbkdf2',

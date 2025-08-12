@@ -321,6 +321,41 @@ export class AuthEnabledSnowflakeClient {
   }
 
   /**
+   * Log tool execution events for monitoring
+   */
+  async logToolExecution(toolName: string, status: 'start' | 'success' | 'failure', errorMessage?: string): Promise<void> {
+    try {
+      const eventId = `tool-${Date.now()}`;
+      const activity = `cdesk.tool_${status}`;
+      
+      // Log to events table using safe template
+      await this.executeTemplate(
+        'LOG_EVENT',
+        [
+          activity,
+          'claude_desktop',
+          JSON.stringify({
+            tool: toolName,
+            status,
+            error: errorMessage,
+            timestamp: new Date().toISOString(),
+          }),
+          null, // link
+          process.env.SESSION_ID || null,
+          `cdesk_tool_${eventId}`,
+        ],
+        { timeout: 1000 } // Very short timeout, this is fire-and-forget
+      ).catch(err => {
+        // Silently fail, this is non-critical
+        logger.debug({ error: err, tool: toolName, status }, 'Failed to log tool execution');
+      });
+    } catch (error) {
+      // Silent failure, don't impact tool execution
+      logger.debug({ error, tool: toolName }, 'Error logging tool execution');
+    }
+  }
+
+  /**
    * Get comprehensive system health status
    */
   async getSystemHealth(): Promise<any> {
