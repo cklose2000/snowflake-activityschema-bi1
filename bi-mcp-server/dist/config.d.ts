@@ -84,16 +84,28 @@ declare const configSchema: z.ZodObject<{
         getContextP95: z.ZodDefault<z.ZodNumber>;
         submitQueryTimeout: z.ZodDefault<z.ZodNumber>;
         logEventTimeout: z.ZodDefault<z.ZodNumber>;
+        cacheHitTimeout: z.ZodDefault<z.ZodNumber>;
+        databaseQueryTimeout: z.ZodDefault<z.ZodNumber>;
+        connectionTimeout: z.ZodDefault<z.ZodNumber>;
+        connectionHeartbeat: z.ZodDefault<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
         firstTokenLatency: number;
         getContextP95: number;
         submitQueryTimeout: number;
         logEventTimeout: number;
+        cacheHitTimeout: number;
+        databaseQueryTimeout: number;
+        connectionTimeout: number;
+        connectionHeartbeat: number;
     }, {
         firstTokenLatency?: number | undefined;
         getContextP95?: number | undefined;
         submitQueryTimeout?: number | undefined;
         logEventTimeout?: number | undefined;
+        cacheHitTimeout?: number | undefined;
+        databaseQueryTimeout?: number | undefined;
+        connectionTimeout?: number | undefined;
+        connectionHeartbeat?: number | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     snowflake: {
@@ -130,6 +142,10 @@ declare const configSchema: z.ZodObject<{
         getContextP95: number;
         submitQueryTimeout: number;
         logEventTimeout: number;
+        cacheHitTimeout: number;
+        databaseQueryTimeout: number;
+        connectionTimeout: number;
+        connectionHeartbeat: number;
     };
 }, {
     snowflake: {
@@ -166,6 +182,10 @@ declare const configSchema: z.ZodObject<{
         getContextP95?: number | undefined;
         submitQueryTimeout?: number | undefined;
         logEventTimeout?: number | undefined;
+        cacheHitTimeout?: number | undefined;
+        databaseQueryTimeout?: number | undefined;
+        connectionTimeout?: number | undefined;
+        connectionHeartbeat?: number | undefined;
     };
 }>;
 export type Config = z.infer<typeof configSchema>;

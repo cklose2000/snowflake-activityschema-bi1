@@ -8,8 +8,12 @@ export declare class ContextCache {
     private redis;
     private readonly keyPrefix;
     private readonly ttl;
+    private bloomFilter;
+    private accessPatterns;
+    private preloadedUsers;
     private metricsBuffer;
-    constructor(maxSize?: number, ttl?: number, // 1 minute
+    constructor(maxSize?: number, // Increased from 1000 to 10000 for better hit rate
+    ttl?: number, // 5 minutes (increased from 1 minute)
     redisConfig?: {
         host: string;
         port: number;
@@ -20,12 +24,17 @@ export declare class ContextCache {
     get(customerId: string): Promise<ContextData | null>;
     set(customerId: string, data: ContextData): Promise<void>;
     warmup(customerIds: string[]): Promise<void>;
+    private trackAccess;
+    getMostAccessedUsers(limit?: number): string[];
+    private fastJSONParse;
     clear(): void;
     private recordMetrics;
     getMetrics(): {
         hits: number;
         misses: number;
+        negativeHits: number;
         hitRate: number;
+        negativeHitRate: number;
         p50Latency: number;
         p95Latency: number;
         p99Latency: number;
@@ -36,7 +45,9 @@ export declare class ContextCache {
     getStats(): {
         hits: number;
         misses: number;
+        negativeHits: number;
         hitRate: number;
+        negativeHitRate: number;
         p50Latency: number;
         p95Latency: number;
         p99Latency: number;

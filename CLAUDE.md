@@ -1,5 +1,14 @@
 # Snowflake ActivitySchema BI for Claude Desktop
 
+## ✅ CURRENT IMPLEMENTATION STATUS
+
+**IMPORTANT**: The system correctly uses `CLAUDE_LOGS.ACTIVITIES` as the production database location:
+- **Environment uses**: `CLAUDE_LOGS.ACTIVITIES` (CORRECT - this is the actual Snowflake location)
+- **Templates use**: `CLAUDE_LOGS.ACTIVITIES.*` (CORRECT - aligned with environment)
+- **Note**: While the PRD references `analytics.activity.*` conceptually, the actual implementation uses `CLAUDE_LOGS.ACTIVITIES` per the Snowflake environment configuration
+
+The system is properly configured to use the correct production database.
+
 ## 🛡️ VALIDATION PHILOSOPHY: Trust but Verify
 
 **No victory without validation.** Every claim of success, completion, or achievement MUST be independently verified before acceptance. This is not about cynicism - it's about professionalism and reliability.
@@ -35,7 +44,9 @@ When ANY of these phrases appear, validation is MANDATORY:
 - NO synchronous DB writes in turn path
 - NO inline rendering of tables > 10 rows
 - ALL data operations MUST use SafeSQL templates
-- QUERY_TAG='cdesk' on ALL Snowflake queries
+- QUERY_TAG='cdesk_[shortUuid]' on ALL Snowflake queries (8-char UUID prefix)
+- ALL activities MUST use `cdesk.*` namespace (e.g., `cdesk.user_asked`, `cdesk.sql_executed`)
+- STRICT ActivitySchema v2.0 compliance - NO deviations in base stream
 
 ## Project Architecture
 - **Claude Desktop MCP**: Node.js ultra-light tools for minimal latency
@@ -52,11 +63,14 @@ When ANY of these phrases appear, validation is MANDATORY:
 - **W9-10**: Governance & hardening
 
 ## Key Tables (Strict ActivitySchema v2.0)
-- `analytics.activity.events`: Core v2.0 compliant event stream (spec fields only)
-- `analytics.activity_cdesk.insight_atoms`: Structured memory with subject, metric, value, provenance
-- `analytics.activity_cdesk.artifacts`: Large result storage with S3 references
-- `analytics.activity_cdesk.context_cache`: Customer state blob for < 25ms retrieval
-- `analytics.activity._ingest_ids`: Deduplication tracking for idempotent ingestion
+- `CLAUDE_LOGS.ACTIVITIES.events`: Core v2.0 compliant event stream
+  - **Required columns**: `activity`, `customer`, `ts`, `activity_repeated_at`, `activity_occurrence`
+  - **Optional spec columns**: `link`, `revenue_impact`
+  - **Extensions** (underscore prefix): `_feature_json`, `_source_system`, `_source_version`, `_session_id`, `_query_tag`
+- `CLAUDE_LOGS.ACTIVITIES.insight_atoms`: Structured memory (ONLY authoritative recall mechanism)
+- `CLAUDE_LOGS.ACTIVITIES.artifacts`: Large result storage with S3 references
+- `CLAUDE_LOGS.ACTIVITIES.context_cache`: Read-optimized state blob for < 25ms retrieval
+- `CLAUDE_LOGS.ACTIVITIES._ingest_ids`: Deduplication tracking for idempotent ingestion
 
 ## Import Context
 - @docs/prd-v2.md - Complete product requirements and SLOs
@@ -116,13 +130,16 @@ When ANY of these phrases appear, validation is MANDATORY:
 ### 1. log_event
 ```typescript
 interface LogEventParams {
-  activity: string;          // ActivitySchema activity name (e.g., 'cdesk.user_asked')
+  activity: string;          // MUST use cdesk.* namespace (e.g., 'cdesk.user_asked')
   feature_json: object;      // Event metadata (stored as _feature_json extension)
-  link?: string;             // Reference URL
+  link?: string;             // Reference URL (spec-compliant optional column)
+  revenue_impact?: number;   // Revenue attribution (spec-compliant optional column)
 }
 // Returns: void (fire-and-forget to NDJSON queue)
 // Latency: < 10ms local write
-// Note: Writes to analytics.activity.events with v2.0 compliance
+// Note: Writes to CLAUDE_LOGS.ACTIVITIES.events with strict v2.0 compliance
+// Automatically computes: activity_occurrence, activity_repeated_at
+// Sets: _query_tag='cdesk_[shortUuid]', _source_system='claude_desktop'
 ```
 
 ### 2. get_context
@@ -161,15 +178,21 @@ interface LogInsightParams {
 ## Snowflake Configuration
 
 ### Connection Details
-- Account: FBC56289.us-east-1.aws
-- Warehouse: COMPUTE_XS
-- Database: ANALYTICS
-- Schema: ACTIVITY (base) / ACTIVITY_CDESK (extensions)
-- Role: ACCOUNTADMIN
+- Account: FBC56289.us-east-1.aws (or yshmxno-fbc56289)
+- Warehouse: COMPUTE_WH (or COMPUTE_XS)
+- Database: CLAUDE_LOGS (production database)
+- Schema: ACTIVITIES (contains all tables)
+- Role: CLAUDE_DESKTOP_ROLE (or ACCOUNTADMIN for setup)
+
+### Table Organization
+All tables live in `CLAUDE_LOGS.ACTIVITIES` schema:
+- Base stream: `events` table (ActivitySchema v2.0 compliant)
+- Extensions: `insight_atoms`, `artifacts`, `context_cache`, `_ingest_ids`
 
 ### Query Standards
-- ALWAYS set QUERY_TAG='cdesk'
-- Use clustering keys on (activity, ts)
+- ALWAYS set QUERY_TAG='cdesk_[shortUuid]' (8-char UUID prefix)
+- Use clustering keys on (customer, ts) per spec
+- Required columns MUST be non-null: activity, customer, ts, activity_occurrence
 - Implement micro-partitions for time-series
 - Enable query result caching
 - Set statement timeout to 30s
@@ -234,6 +257,48 @@ interface LogInsightParams {
 - Queue depth > 100K: Apply backpressure
 - Credit burn > $100/hour: Kill switch
 - Error rate > 1%: Investigation required
+
+## Activity Namespace Convention (cdesk.*)
+
+ALL Claude Desktop activities MUST use the `cdesk.*` namespace:
+
+### Core Activities
+- `cdesk.session_started` - New session initiated
+- `cdesk.session_ended` - Session terminated
+- `cdesk.user_asked` - User submitted a question
+- `cdesk.claude_responded` - Claude provided an answer
+
+### Tool Activities
+- `cdesk.tool_called` - Any tool invocation
+- `cdesk.sql_executed` - SQL query submitted
+- `cdesk.sql_completed` - SQL query finished
+- `cdesk.file_read` - File accessed
+- `cdesk.file_written` - File created/modified
+
+### Memory Activities
+- `cdesk.insight_recorded` - Insight atom created
+- `cdesk.context_refreshed` - Context cache updated
+- `cdesk.artifact_created` - Large result stored
+
+### Error Activities
+- `cdesk.error_encountered` - Any error occurred
+- `cdesk.retry_attempted` - Operation retried
+- `cdesk.fallback_triggered` - Degraded mode activated
+
+## Structured Memory Philosophy
+
+**Insight Atoms are the ONLY authoritative recall mechanism.**
+
+- Prose summaries: Non-authoritative, for display only
+- Context cache: Derived from atoms, not source of truth
+- Artifacts: Store samples and metadata, not insights
+- All business logic must reference atoms, not prose
+
+This ensures:
+- Consistent recall across sessions
+- Provenance tracking for all insights
+- No hallucination in metric reporting
+- Audit trail for all decisions
 
 ## Launch Criteria
 

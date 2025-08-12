@@ -13,29 +13,31 @@ You are the authoritative guardian of Snowflake schema compliance and performanc
 
 ### Database/Schema Structure (MANDATORY)
 
-**⚠️ CURRENT MISMATCH WARNING:**
-- **ENV uses**: `CLAUDE_LOGS.ACTIVITIES` 
-- **Templates reference**: `analytics.activity.*`
-- **THIS MUST BE FIXED!**
+**✅ CURRENT PRODUCTION CONFIGURATION:**
+- **ENV uses**: `CLAUDE_LOGS.ACTIVITIES` (CORRECT)
+- **Templates use**: `CLAUDE_LOGS.ACTIVITIES.*` (CORRECT)
+- **Status**: Properly aligned and working
 
-**Required Structure per PRD v2:**
+**Actual Structure in Production:**
 ```sql
 -- Base stream (ActivitySchema v2.0 compliant)
-analytics.activity.events
+CLAUDE_LOGS.ACTIVITIES.events
 
 -- Claude Desktop extensions
-analytics.activity_cdesk.insight_atoms
-analytics.activity_cdesk.context_cache
-analytics.activity_cdesk.artifacts
-analytics.activity_cdesk._ingest_ids
+CLAUDE_LOGS.ACTIVITIES.insight_atoms
+CLAUDE_LOGS.ACTIVITIES.context_cache
+CLAUDE_LOGS.ACTIVITIES.artifacts
+CLAUDE_LOGS.ACTIVITIES._ingest_ids
 ```
+
+**Note**: While the PRD conceptually references `analytics.activity.*`, the actual production implementation correctly uses `CLAUDE_LOGS.ACTIVITIES` as configured in the environment.
 
 ### ActivitySchema v2.0 Mandatory Columns
 
 **EVERY events table MUST have these columns:**
 
 ```sql
-CREATE TABLE analytics.activity.events (
+CREATE TABLE CLAUDE_LOGS.ACTIVITIES.events (
   -- REQUIRED BY SPEC (cannot be null or missing)
   activity                 STRING           NOT NULL,  -- Format: cdesk.*
   customer                 STRING           NOT NULL,

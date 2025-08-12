@@ -7,11 +7,17 @@
 
 import snowflake from 'snowflake-sdk';
 import { Config } from '../config.js';
-import pino from 'pino';
+// import pino from 'pino';
 import { performance } from 'perf_hooks';
 import { SAFE_TEMPLATES } from '../sql/safe-templates.js';
 
-const logger = pino.default({ name: 'snowflake-client' });
+// Simple logger for now
+const logger = {
+  info: (obj: any, msg?: string) => console.log(`INFO: ${msg || ''} ${JSON.stringify(obj)}`),
+  warn: (obj: any, msg?: string) => console.warn(`WARN: ${msg || ''} ${JSON.stringify(obj)}`),
+  error: (obj: any, msg?: string) => console.error(`ERROR: ${msg || ''} ${JSON.stringify(obj)}`),
+  debug: (obj: any, msg?: string) => process.env.LOG_LEVEL === 'debug' && console.log(`DEBUG: ${msg || ''} ${JSON.stringify(obj)}`),
+};
 
 export interface QueryResult {
   rows: any[];
@@ -69,8 +75,9 @@ export class SnowflakeClient {
         schema: this.config.snowflake.schema,
         role: this.config.snowflake.role,
         clientSessionKeepAlive: true,
-        clientSessionKeepAliveHeartbeatFrequency: 3600, // 1 hour
+        clientSessionKeepAliveHeartbeatFrequency: this.config.performance.connectionHeartbeat || 300, // 5 minutes default
         jsTreatIntegerAsBigInt: false,
+        timeout: this.config.performance.connectionTimeout || 5000, // 5 seconds for connection
       });
 
       conn.connect((err) => {
@@ -96,22 +103,27 @@ export class SnowflakeClient {
     });
   }
 
-  private async getConnection(): Promise<snowflake.Connection> {
+  private async getConnection(preferRead?: boolean): Promise<snowflake.Connection> {
     if (!this.isInitialized) {
       throw new Error('Snowflake client not initialized');
     }
     
+    // For now, use single pool (readPool/writePool split not yet implemented)
+    // TODO: Implement separate pools for reads and writes
+    const pool = this.connections;
+    const activeSet = this.activeConnections;
+    
     // Find available connection
-    for (const conn of this.connections) {
-      if (!this.activeConnections.has(conn)) {
-        this.activeConnections.add(conn);
+    for (const conn of pool) {
+      if (!activeSet.has(conn)) {
+        activeSet.add(conn);
         return conn;
       }
     }
     
     // All connections busy, wait and retry
     await new Promise(resolve => setTimeout(resolve, 10));
-    return this.getConnection();
+    return this.getConnection(preferRead);
   }
 
   private releaseConnection(conn: snowflake.Connection): void {
@@ -181,12 +193,17 @@ export class SnowflakeClient {
     
     // Validate parameters
     const validatedParams = template.validator(params);
-    
-    const conn = await this.getConnection();
+    // Determine if this is a read or write operation
+    const isReadOperation = templateName.startsWith('GET_') || templateName === 'CHECK_HEALTH';
+    const conn = await this.getConnection(isReadOperation);
     
     try {
       return await new Promise((resolve, reject) => {
-        const timeout = options.timeout || 30000;
+        // Use appropriate timeout based on operation type
+        const defaultTimeout = options.useCache && this.queryCache.has(`${templateName}:${JSON.stringify(params)}`)
+          ? this.config.performance.cacheHitTimeout
+          : this.config.performance.databaseQueryTimeout;
+        const timeout = options.timeout || defaultTimeout || 1000;
         let timeoutHandle: NodeJS.Timeout;
         
         // Set timeout
@@ -263,7 +280,8 @@ export class SnowflakeClient {
   }
 
   async executeBatch(operations: Array<{ template: string; params: any[] }>): Promise<void> {
-    const conn = await this.getConnection();
+    // Batch operations are writes
+    const conn = await this.getConnection(false);
     
     try {
       // Start transaction
@@ -352,8 +370,9 @@ export class SnowflakeClient {
           schema: this.config.snowflake.schema,
           role: this.config.snowflake.role,
           clientSessionKeepAlive: true,
-          clientSessionKeepAliveHeartbeatFrequency: 3600,
+          clientSessionKeepAliveHeartbeatFrequency: this.config.performance.connectionHeartbeat || 300,
           jsTreatIntegerAsBigInt: false,
+          timeout: this.config.performance.connectionTimeout || 5000,
         });
         
         await new Promise<void>((resolve, reject) => {
@@ -381,7 +400,7 @@ export class SnowflakeClient {
         [customerId],
         { 
           useCache: true,
-          timeout: 1000, // 1 second timeout for context queries
+          timeout: this.config.performance.databaseQueryTimeout || 1000, // Use configured timeout
         }
       );
       

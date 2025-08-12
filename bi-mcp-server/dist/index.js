@@ -11,6 +11,7 @@ import { TicketManager } from './query/ticket-manager.js';
 import { validateAllTemplates, TEMPLATE_NAMES, } from './sql/safe-templates.js';
 import { generateQueryTag } from './utils/query-tag.js';
 import { SnowflakeClient } from './db/snowflake-client.js';
+import { AuthEnabledSnowflakeClient } from './db/auth-enabled-snowflake-client.js';
 // Initialize logger
 const logger = pino.default({
     name: 'bi-mcp-server',
@@ -29,6 +30,9 @@ const metrics = {
     getContext: { count: 0, totalMs: 0, errors: 0, p95: [] },
     submitQuery: { count: 0, totalMs: 0, errors: 0 },
     logInsight: { count: 0, totalMs: 0, errors: 0 },
+    getAuthHealth: { count: 0, totalMs: 0, errors: 0 },
+    unlockAccount: { count: 0, totalMs: 0, errors: 0 },
+    rotateCredentials: { count: 0, totalMs: 0, errors: 0 },
 };
 // Tool schemas
 const logEventSchema = z.object({
@@ -113,6 +117,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
                     provenance_query_hash: { type: 'string', description: 'Source query hash (16 chars)' },
                 },
                 required: ['subject', 'metric', 'value', 'provenance_query_hash'],
+            },
+        },
+        {
+            name: 'get_auth_health',
+            description: 'Get comprehensive authentication system health status',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    include_details: { type: 'boolean', description: 'Include detailed account metrics', default: true },
+                },
+            },
+        },
+        {
+            name: 'unlock_account',
+            description: 'Manually unlock a Snowflake account (admin operation)',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    username: { type: 'string', description: 'Account username to unlock' },
+                    reason: { type: 'string', description: 'Reason for unlocking (for audit)' },
+                },
+                required: ['username'],
+            },
+        },
+        {
+            name: 'rotate_credentials',
+            description: 'Force rotation to next available account',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    force: { type: 'boolean', description: 'Force rotation even if current account is healthy', default: false },
+                },
             },
         },
     ],
@@ -276,6 +312,99 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     ],
                 };
             }
+            case 'get_auth_health': {
+                // Check if auth-enabled client is available
+                if (!('getSystemHealth' in snowflakeClient)) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    status: 'auth_agent_disabled',
+                                    message: 'Auth agent not enabled. Set AUTH_AGENT_ENABLED=true to enable.',
+                                }),
+                            },
+                        ],
+                    };
+                }
+                const systemHealth = await snowflakeClient.getSystemHealth();
+                const includeDetails = args?.include_details !== false;
+                const response = {
+                    status: systemHealth.overall,
+                    summary: systemHealth.summary,
+                    recommendations: systemHealth.recommendations,
+                    connectionPools: systemHealth.connectionPools?.length || 0,
+                    cacheSize: systemHealth.cacheSize,
+                    lastHealthCheck: systemHealth.lastHealthCheck,
+                };
+                if (includeDetails) {
+                    response.accounts = systemHealth.accounts;
+                    response.circuitBreakers = systemHealth.circuitBreakers;
+                }
+                recordMetric('getAuthHealth', startTime);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(response, null, 2),
+                        },
+                    ],
+                };
+            }
+            case 'unlock_account': {
+                // Check if auth-enabled client is available
+                if (!('unlockAccount' in snowflakeClient)) {
+                    throw new Error('Auth agent not available. Enable with AUTH_AGENT_ENABLED=true');
+                }
+                const username = args?.username;
+                const reason = args?.reason || 'Manual unlock via MCP tool';
+                if (!username || typeof username !== 'string') {
+                    throw new Error('Username is required');
+                }
+                const success = await snowflakeClient.unlockAccount(username);
+                recordMetric('unlockAccount', startTime);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                success,
+                                account: username,
+                                reason,
+                                timestamp: new Date().toISOString(),
+                                message: success ? 'Account unlocked successfully' : 'Failed to unlock account',
+                            }),
+                        },
+                    ],
+                };
+            }
+            case 'rotate_credentials': {
+                // Check if auth-enabled client is available
+                if (!('refreshConnections' in snowflakeClient)) {
+                    throw new Error('Auth agent not available. Enable with AUTH_AGENT_ENABLED=true');
+                }
+                const force = args?.force === true;
+                // Refresh connection pools to trigger rotation
+                await snowflakeClient.refreshConnections();
+                // Get updated system health to show new active account
+                const systemHealth = await snowflakeClient.getSystemHealth();
+                const activeAccounts = systemHealth.accounts?.filter((acc) => acc.isAvailable) || [];
+                recordMetric('rotateCredentials', startTime);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                success: true,
+                                rotationTime: new Date().toISOString(),
+                                forced: force,
+                                availableAccounts: activeAccounts.length,
+                                activeAccount: activeAccounts.find((acc) => acc.priority === 1)?.username || 'None',
+                            }),
+                        },
+                    ],
+                };
+            }
             default:
                 throw new Error(`Unknown tool: ${name}`);
         }
@@ -327,12 +456,30 @@ function recordMetric(tool, startTime) {
 // Initialize Snowflake connection pool
 async function initSnowflake() {
     try {
-        snowflakeClient = new SnowflakeClient(config, 20); // 20 connection pool for better concurrency
+        // Use auth-enabled client if AUTH_AGENT_ENABLED is set
+        const useAuthAgent = process.env.AUTH_AGENT_ENABLED === 'true' || process.env.AUTH_AGENT_ENABLED === '1';
+        if (useAuthAgent) {
+            logger.info('Initializing with Auth-Enabled Snowflake client');
+            snowflakeClient = new AuthEnabledSnowflakeClient(config);
+        }
+        else {
+            logger.info('Initializing with standard Snowflake client');
+            snowflakeClient = new SnowflakeClient(config, 20); // 20 connection pool for better concurrency
+        }
         await snowflakeClient.initialize();
-        logger.info('Snowflake client initialized with connection pool');
+        logger.info(`Snowflake client initialized ${useAuthAgent ? 'with auth agent' : 'with standard pool'}`);
         // Test connection with health check
         const health = await snowflakeClient.executeTemplate(TEMPLATE_NAMES.CHECK_HEALTH, [], { timeout: 5000 });
         logger.info({ health }, 'Snowflake health check passed');
+        // Log system health if using auth agent
+        if (useAuthAgent && 'getSystemHealth' in snowflakeClient) {
+            const systemHealth = await snowflakeClient.getSystemHealth();
+            logger.info({
+                overall: systemHealth.overall,
+                accounts: systemHealth.accounts?.length || 0,
+                connectionPools: systemHealth.connectionPools?.length || 0,
+            }, 'Auth agent system health');
+        }
     }
     catch (error) {
         logger.error({ error }, 'Failed to initialize Snowflake client');
@@ -379,6 +526,28 @@ async function main() {
                 tickets: ticketManager.getStats(),
             }, 'Performance metrics');
         }, 30000);
+        // Proactive cache refresh for hot users
+        setInterval(async () => {
+            if (snowflakeClient && cache) {
+                const hotUsers = cache.getMostAccessedUsers(50); // Top 50 users
+                for (const userId of hotUsers) {
+                    try {
+                        // Refresh context in background
+                        const context = await snowflakeClient.getContextFromCache(userId);
+                        if (context) {
+                            await cache.set(userId, {
+                                context: context,
+                                updated_at: new Date().toISOString(),
+                            });
+                        }
+                    }
+                    catch (error) {
+                        logger.debug({ error, userId }, 'Failed to refresh cache for user');
+                    }
+                }
+                logger.debug({ refreshedUsers: hotUsers.length }, 'Proactive cache refresh completed');
+            }
+        }, 60000); // Every minute
     }
     catch (error) {
         logger.error({ error }, 'Failed to start server');

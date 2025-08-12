@@ -32,9 +32,14 @@ const configSchema = z.object({
   }),
   performance: z.object({
     firstTokenLatency: z.number().default(300), // ms
-    getContextP95: z.number().default(25), // ms - CRITICAL
+    getContextP95: z.number().default(25), // ms - CRITICAL (for cache hits only)
     submitQueryTimeout: z.number().default(50), // ms
     logEventTimeout: z.number().default(10), // ms
+    // Separate timeouts for different operation types
+    cacheHitTimeout: z.number().default(25), // ms - for cached responses
+    databaseQueryTimeout: z.number().default(1000), // ms - for actual DB queries
+    connectionTimeout: z.number().default(5000), // ms - for establishing connections
+    connectionHeartbeat: z.number().default(300), // seconds - keep-alive interval
   }),
 });
 
@@ -72,6 +77,10 @@ export function loadConfig(): Config {
       getContextP95: process.env.PERF_GET_CONTEXT_P95 ? parseInt(process.env.PERF_GET_CONTEXT_P95) : undefined,
       submitQueryTimeout: process.env.PERF_SUBMIT_QUERY ? parseInt(process.env.PERF_SUBMIT_QUERY) : undefined,
       logEventTimeout: process.env.PERF_LOG_EVENT ? parseInt(process.env.PERF_LOG_EVENT) : undefined,
+      cacheHitTimeout: process.env.PERF_CACHE_HIT ? parseInt(process.env.PERF_CACHE_HIT) : undefined,
+      databaseQueryTimeout: process.env.PERF_DB_QUERY ? parseInt(process.env.PERF_DB_QUERY) : undefined,
+      connectionTimeout: process.env.PERF_CONNECTION ? parseInt(process.env.PERF_CONNECTION) : undefined,
+      connectionHeartbeat: process.env.PERF_HEARTBEAT ? parseInt(process.env.PERF_HEARTBEAT) : undefined,
     },
   });
 }

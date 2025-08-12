@@ -13,7 +13,13 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "test:integration": "jest tests/integration/",
+    "test:e2e": "jest tests/e2e/",
+    "test:load": "tsx tests/load/concurrent-users.test.ts",
     "bench:context": "tsx src/benchmarks/context.bench.ts",
+    "bench:full": "tsx benchmarks/full-stack.bench.ts",
+    "benchmark": "npm run bench:full",
+    "perf:test": "npm run test:integration && npm run test:e2e && npm run benchmark",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "security:scan": "npm audit && eslint --plugin security src"

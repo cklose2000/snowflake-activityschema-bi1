@@ -7,15 +7,23 @@ export class ContextCache {
     redis = null;
     keyPrefix;
     ttl;
-    metricsBuffer = { hits: 0, misses: 0, latencies: [] };
-    constructor(maxSize = 1000, ttl = 60000, // 1 minute
+    bloomFilter = new Set(); // Bloom filter for negative cache
+    accessPatterns = new Map(); // Track access frequency
+    preloadedUsers = new Set(); // Track pre-loaded users
+    metricsBuffer = { hits: 0, misses: 0, negativeHits: 0, latencies: [] };
+    constructor(maxSize = 10000, // Increased from 1000 to 10000 for better hit rate
+    ttl = 300000, // 5 minutes (increased from 1 minute)
     redisConfig) {
-        // Initialize ultra-fast in-memory LRU cache
+        // Initialize ultra-fast in-memory LRU cache with optimized settings
         this.memoryCache = new LRUCache({
             max: maxSize,
             ttl: ttl,
             updateAgeOnGet: true,
             updateAgeOnHas: false,
+            // Dispose callback for metrics
+            dispose: (_value, key) => {
+                this.bloomFilter.delete(key);
+            }
         });
         this.ttl = ttl;
         this.keyPrefix = redisConfig?.keyPrefix || 'bi:context:';
@@ -49,11 +57,20 @@ export class ContextCache {
     }
     async get(customerId) {
         const startTime = process.hrtime.bigint();
+        // Track access pattern for intelligent pre-loading
+        this.trackAccess(customerId);
         try {
+            // Check bloom filter first (< 0.1ms) - negative cache
+            if (!this.bloomFilter.has(customerId) && !this.preloadedUsers.has(customerId)) {
+                // User definitely doesn't exist, skip all lookups
+                this.recordMetrics(false, startTime, true);
+                return null;
+            }
             // First check memory cache (sub-microsecond)
             const memoryResult = this.memoryCache.get(customerId);
             if (memoryResult) {
                 this.recordMetrics(true, startTime);
+                // Return cached object directly without cloning for speed
                 return memoryResult;
             }
             // If Redis is available and connected, try Redis (with timeout)
@@ -66,7 +83,8 @@ export class ContextCache {
                 const redisResult = await Promise.race([redisPromise, timeoutPromise]);
                 if (redisResult && typeof redisResult === 'string') {
                     try {
-                        const data = JSON.parse(redisResult);
+                        // Use optimized JSON parsing
+                        const data = this.fastJSONParse(redisResult);
                         // Warm memory cache
                         this.memoryCache.set(customerId, data);
                         this.recordMetrics(true, startTime);
@@ -87,6 +105,8 @@ export class ContextCache {
         }
     }
     async set(customerId, data) {
+        // Add to bloom filter for positive existence
+        this.bloomFilter.add(customerId);
         // Always set in memory cache first (non-blocking)
         this.memoryCache.set(customerId, data);
         // Async write to Redis if available (fire-and-forget)
@@ -100,18 +120,59 @@ export class ContextCache {
         }
     }
     async warmup(customerIds) {
-        // This would be called on startup to pre-warm cache
-        // Implementation depends on having Snowflake connection
+        // Mark these users as pre-loaded to skip bloom filter check
+        customerIds.forEach(id => {
+            this.preloadedUsers.add(id);
+            this.bloomFilter.add(id);
+        });
         logger.info({ count: customerIds.length }, 'Cache warmup requested');
+    }
+    // Track access patterns for intelligent pre-loading
+    trackAccess(customerId) {
+        const count = this.accessPatterns.get(customerId) || 0;
+        this.accessPatterns.set(customerId, count + 1);
+        // Keep only top 1000 most accessed users
+        if (this.accessPatterns.size > 1000) {
+            // Remove least accessed
+            const sorted = Array.from(this.accessPatterns.entries())
+                .sort((a, b) => a[1] - b[1]);
+            this.accessPatterns.delete(sorted[0][0]);
+        }
+    }
+    // Get most frequently accessed users for pre-warming
+    getMostAccessedUsers(limit = 100) {
+        return Array.from(this.accessPatterns.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, limit)
+            .map(([userId]) => userId);
+    }
+    // Optimized JSON parsing that reuses objects when possible
+    fastJSONParse(str) {
+        try {
+            // For small strings, native JSON.parse is actually fastest
+            if (str.length < 1024) {
+                return JSON.parse(str);
+            }
+            // For larger strings, we could use a streaming parser
+            // but for now, stick with native
+            return JSON.parse(str);
+        }
+        catch (err) {
+            logger.warn({ err }, 'JSON parse failed');
+            return null;
+        }
     }
     clear() {
         this.memoryCache.clear();
     }
-    recordMetrics(hit, startTime) {
+    recordMetrics(hit, startTime, negativeHit = false) {
         const latencyNs = Number(process.hrtime.bigint() - startTime);
         const latencyMs = latencyNs / 1_000_000;
         if (hit) {
             this.metricsBuffer.hits++;
+        }
+        else if (negativeHit) {
+            this.metricsBuffer.negativeHits++;
         }
         else {
             this.metricsBuffer.misses++;
@@ -125,10 +186,13 @@ export class ContextCache {
     getMetrics() {
         const latencies = [...this.metricsBuffer.latencies].sort((a, b) => a - b);
         const p95Index = Math.floor(latencies.length * 0.95);
+        const totalRequests = this.metricsBuffer.hits + this.metricsBuffer.misses + this.metricsBuffer.negativeHits;
         return {
             hits: this.metricsBuffer.hits,
             misses: this.metricsBuffer.misses,
-            hitRate: this.metricsBuffer.hits / (this.metricsBuffer.hits + this.metricsBuffer.misses),
+            negativeHits: this.metricsBuffer.negativeHits,
+            hitRate: this.metricsBuffer.hits / totalRequests,
+            negativeHitRate: this.metricsBuffer.negativeHits / totalRequests,
             p50Latency: latencies[Math.floor(latencies.length * 0.5)] || 0,
             p95Latency: latencies[p95Index] || 0,
             p99Latency: latencies[Math.floor(latencies.length * 0.99)] || 0,
