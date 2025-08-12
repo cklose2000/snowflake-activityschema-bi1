@@ -2,6 +2,7 @@ export interface SQLTemplate {
     sql: string;
     validator: (params: any[]) => any[];
 }
+export declare const SAFE_TEMPLATES: Map<string, SQLTemplate>;
 export declare function generateQueryHash(template: string, params: any): string;
 export declare function executeSafeSQL(connection: any, // Snowflake connection
 templateName: string, params: any[], options?: {

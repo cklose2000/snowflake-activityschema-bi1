@@ -22,27 +22,44 @@ export class TicketManager {
             this.cleanupOldTickets();
         }, 60000); // Every minute
     }
-    createTicket(template, params, byteCap, queryTag) {
+    createTicket(options) {
         const ticketId = uuidv4();
         const ticket = {
             ticket_id: ticketId,
             status: TicketStatus.PENDING,
-            template,
-            params,
-            query_tag: queryTag,
+            template: options.template,
+            params: options.params,
             created_at: new Date().toISOString(),
-            byte_cap: byteCap,
+            byte_cap: options.byte_cap,
         };
         this.tickets.set(ticketId, ticket);
         this.queue.push(ticketId);
-        logger.info({ ticketId, template }, 'Created query ticket');
+        logger.info({ ticketId, template: options.template }, 'Created query ticket');
         // Start processing if not already running
         if (!this.processing) {
             this.processQueue().catch(err => {
                 logger.error({ err }, 'Queue processing error');
             });
         }
-        return ticketId;
+        return { id: ticketId, status: TicketStatus.PENDING };
+    }
+    updateStatus(ticketId, status, result) {
+        const ticket = this.tickets.get(ticketId);
+        if (ticket) {
+            ticket.status = status;
+            if (result) {
+                if (result.error) {
+                    ticket.error = result.error;
+                }
+                else {
+                    ticket.result = result;
+                }
+            }
+            if (status === 'completed' || status === 'failed') {
+                ticket.completed_at = new Date().toISOString();
+                this.activeQueries--;
+            }
+        }
     }
     getTicket(ticketId) {
         return this.tickets.get(ticketId) || null;

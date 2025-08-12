@@ -33,5 +33,15 @@ export declare class ContextCache {
         redisConnected: boolean;
     };
     close(): Promise<void>;
+    getStats(): {
+        hits: number;
+        misses: number;
+        hitRate: number;
+        p50Latency: number;
+        p95Latency: number;
+        p99Latency: number;
+        memoryCacheSize: number;
+        redisConnected: boolean;
+    };
 }
 //# sourceMappingURL=context-cache.d.ts.map

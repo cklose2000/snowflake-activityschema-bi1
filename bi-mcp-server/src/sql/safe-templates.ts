@@ -4,7 +4,7 @@ import crypto from 'crypto';
 // Validation schemas for parameters
 const uuidSchema = z.string().uuid();
 const customerIdSchema = z.string().min(1).max(255).regex(/^[a-zA-Z0-9-_]+$/);
-const activitySchema = z.string().min(1).max(100).regex(/^[a-z_]+$/);
+const activitySchema = z.string().min(1).max(100).regex(/^[a-z_.]+$/);
 const jsonSchema = z.record(z.any());
 const urlSchema = z.string().url().max(2000);
 
@@ -14,11 +14,11 @@ export interface SQLTemplate {
 }
 
 // Template registry
-const SAFE_TEMPLATES = new Map<string, SQLTemplate>();
+export const SAFE_TEMPLATES = new Map<string, SQLTemplate>();
 
 // Template definitions
 SAFE_TEMPLATES.set('LOG_EVENT', {
-  sql: `INSERT INTO analytics.activity.events (
+  sql: `INSERT INTO CLAUDE_LOGS.ACTIVITIES.events (
     activity, customer, ts, activity_occurrence,
     link, revenue_impact,
     _feature_json, _source_system, _source_version, _session_id, _query_tag
@@ -39,7 +39,7 @@ SAFE_TEMPLATES.set('LOG_EVENT', {
 });
 
 SAFE_TEMPLATES.set('LOG_INSIGHT', {
-  sql: `INSERT INTO analytics.activity_cdesk.insight_atoms (
+  sql: `INSERT INTO CLAUDE_LOGS.ACTIVITIES.insight_atoms (
     id, customer, subject, metric, 
     value, provenance_query_hash, ts
   ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP())`,
@@ -59,7 +59,7 @@ SAFE_TEMPLATES.set('LOG_INSIGHT', {
 
 SAFE_TEMPLATES.set('GET_CONTEXT', {
   sql: `SELECT context_blob, updated_at
-    FROM analytics.activity_cdesk.context_cache
+    FROM CLAUDE_LOGS.ACTIVITIES.context_cache
     WHERE customer = ?
       AND updated_at >= DATEADD(hour, -1, CURRENT_TIMESTAMP())
     LIMIT 1`,
@@ -70,7 +70,7 @@ SAFE_TEMPLATES.set('GET_CONTEXT', {
 });
 
 SAFE_TEMPLATES.set('UPDATE_CONTEXT', {
-  sql: `MERGE INTO analytics.activity_cdesk.context_cache AS target
+  sql: `MERGE INTO CLAUDE_LOGS.ACTIVITIES.context_cache AS target
     USING (SELECT ? as customer, PARSE_JSON(?) as context_blob) AS source
     ON target.customer = source.customer
     WHEN MATCHED THEN UPDATE SET
@@ -90,7 +90,7 @@ SAFE_TEMPLATES.set('UPDATE_CONTEXT', {
 
 SAFE_TEMPLATES.set('GET_RECENT_ACTIVITIES', {
   sql: `SELECT activity, ts, link, _feature_json
-    FROM analytics.activity.events
+    FROM CLAUDE_LOGS.ACTIVITIES.events
     WHERE customer = ?
       AND ts >= DATEADD(hour, ?, CURRENT_TIMESTAMP())
     ORDER BY ts DESC
@@ -111,7 +111,7 @@ SAFE_TEMPLATES.set('GET_ACTIVITY_STATS', {
       COUNT(*) as count,
       AVG(revenue_impact) as avg_revenue,
       MAX(ts) as last_seen
-    FROM analytics.activity.events
+    FROM CLAUDE_LOGS.ACTIVITIES.events
     WHERE customer = ?
       AND ts >= DATEADD(day, ?, CURRENT_TIMESTAMP())
     GROUP BY activity
@@ -134,7 +134,7 @@ SAFE_TEMPLATES.set('CHECK_HEALTH', {
 
 // Template for idempotent ingestion
 SAFE_TEMPLATES.set('CHECK_INGEST_ID', {
-  sql: `SELECT id FROM analytics.activity._ingest_ids WHERE id = ?`,
+  sql: `SELECT id FROM CLAUDE_LOGS.ACTIVITIES._ingest_ids WHERE id = ?`,
   validator: (params) => {
     const [id] = params;
     return [uuidSchema.parse(id)];
@@ -142,7 +142,7 @@ SAFE_TEMPLATES.set('CHECK_INGEST_ID', {
 });
 
 SAFE_TEMPLATES.set('RECORD_INGEST_ID', {
-  sql: `INSERT INTO analytics.activity._ingest_ids (id) VALUES (?)`,
+  sql: `INSERT INTO CLAUDE_LOGS.ACTIVITIES._ingest_ids (id) VALUES (?)`,
   validator: (params) => {
     const [id] = params;
     return [uuidSchema.parse(id)];

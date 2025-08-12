@@ -141,5 +141,8 @@ export class ContextCache {
             await this.redis.quit();
         }
     }
+    getStats() {
+        return this.getMetrics();
+    }
 }
 //# sourceMappingURL=context-cache.js.map

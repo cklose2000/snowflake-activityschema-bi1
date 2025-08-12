@@ -1,0 +1,9 @@
+[connections]
+[connections.poc]
+account = "yshmxno-fbc56289"
+user = "CLAUDE_DESKTOP1"  
+password = "Password123!"
+database = "CLAUDE_LOGS"
+schema = "ACTIVITIES"
+warehouse = "COMPUTE_WH"
+role = "CLAUDE_DESKTOP_ROLE"

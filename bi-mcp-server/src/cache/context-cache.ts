@@ -186,4 +186,8 @@ export class ContextCache {
       await this.redis.quit();
     }
   }
+
+  getStats() {
+    return this.getMetrics();
+  }
 }

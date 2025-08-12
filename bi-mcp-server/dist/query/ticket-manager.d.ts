@@ -27,7 +27,15 @@ export declare class TicketManager {
     private maxConcurrent;
     private activeQueries;
     constructor(maxConcurrent?: number);
-    createTicket(template: string, params: any[], byteCap?: number, queryTag?: string): string;
+    createTicket(options: {
+        template: string;
+        params: any[];
+        byte_cap?: number;
+    }): {
+        id: string;
+        status: TicketStatus;
+    };
+    updateStatus(ticketId: string, status: string, result?: any): void;
     getTicket(ticketId: string): QueryTicket | null;
     updateTicket(ticketId: string, updates: Partial<QueryTicket>): void;
     cancelTicket(ticketId: string): boolean;

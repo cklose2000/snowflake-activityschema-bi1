@@ -1,0 +1,166 @@
+name: Victory Audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited]
+  push:
+    branches: [main, develop]
+  
+  # Also trigger on comments containing victory claims
+  issue_comment:
+    types: [created, edited]
+  pull_request_review_comment:
+    types: [created, edited]
+
+jobs:
+  audit-claims:
+    name: Audit Victory Claims
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd bi-mcp-server && npm ci
+          
+      - name: Check for victory claims in PR
+        id: check-claims
+        run: |
+          # Check PR title and body for victory claims
+          CLAIMS_FOUND=false
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_TITLE="${{ github.event.pull_request.title }}"
+            PR_BODY="${{ github.event.pull_request.body }}"
+            
+            if echo "$PR_TITLE $PR_BODY" | grep -E "✅|[Cc]omplete|[Ss]uccessfully|100%|[Rr]eady for production" > /dev/null 2>&1; then
+              CLAIMS_FOUND=true
+              echo "Victory claims detected in PR"
+            fi
+          fi
+          
+          # Check commit messages
+          if git log --format=%B -n 10 | grep -E "✅|[Cc]omplete|[Ss]uccessfully|100%" > /dev/null 2>&1; then
+            CLAIMS_FOUND=true
+            echo "Victory claims detected in recent commits"
+          fi
+          
+          echo "claims_found=$CLAIMS_FOUND" >> $GITHUB_OUTPUT
+          
+      - name: Run Victory Audit
+        if: steps.check-claims.outputs.claims_found == 'true'
+        id: victory-audit
+        run: |
+          node scripts/victory-audit.js > audit-results.txt 2>&1 || true
+          cat audit-results.txt
+          
+          # Extract trust score from output
+          TRUST_SCORE=$(grep "TRUST SCORE:" audit-results.txt | sed 's/.*TRUST SCORE: \([0-9]*\)%.*/\1/' || echo "0")
+          echo "trust_score=$TRUST_SCORE" >> $GITHUB_OUTPUT
+          
+          # Check if audit passed (exit code 0)
+          if node scripts/victory-audit.js > /dev/null 2>&1; then
+            echo "audit_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "audit_passed=false" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Post audit results as comment
+        if: steps.check-claims.outputs.claims_found == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const auditResults = fs.readFileSync('audit-results.txt', 'utf8');
+            const trustScore = '${{ steps.victory-audit.outputs.trust_score }}';
+            const passed = '${{ steps.victory-audit.outputs.audit_passed }}' === 'true';
+            
+            const emoji = passed ? '✅' : '❌';
+            const status = passed ? 'PASSED' : 'FAILED';
+            
+            const comment = `## ${emoji} Victory Audit ${status}
+            
+            **Trust Score: ${trustScore}%**
+            
+            <details>
+            <summary>Click to see full audit report</summary>
+            
+            \`\`\`
+            ${auditResults}
+            \`\`\`
+            </details>
+            
+            ${!passed ? '⚠️ **This PR cannot be merged until victory claims are validated.**' : ''}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+            
+      - name: Set status check
+        if: steps.check-claims.outputs.claims_found == 'true'
+        run: |
+          if [[ "${{ steps.victory-audit.outputs.audit_passed }}" != "true" ]]; then
+            echo "❌ Victory audit failed! Trust score: ${{ steps.victory-audit.outputs.trust_score }}%"
+            exit 1
+          else
+            echo "✅ Victory audit passed! Trust score: ${{ steps.victory-audit.outputs.trust_score }}%"
+          fi
+          
+  performance-check:
+    name: Performance Validation
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.body, 'ms') || contains(github.event.pull_request.body, 'latency')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd bi-mcp-server && npm ci
+          
+      - name: Run performance benchmark
+        run: |
+          cd bi-mcp-server
+          npm run bench:context || true
+          
+      - name: Comment performance results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const comment = `## 📊 Performance Benchmark Results
+            
+            Performance benchmarks have been requested due to latency claims in this PR.
+            
+            Please run \`npm run bench:context\` locally and include results.
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

@@ -1,19 +1,53 @@
 {
   "name": "snowflake-activityschema-bi",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "ActivitySchema v2.0 compliant BI system for Claude Desktop with Snowflake backend",
+  "main": "bi-mcp-server/dist/index.js",
   "directories": {
     "doc": "docs",
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "cd bi-mcp-server && npm run build",
+    "dev": "cd bi-mcp-server && npm run dev",
+    "start": "cd bi-mcp-server && npm start",
+    "start:dev": "npm run build && npm run dev",
+    "start:prod": "npm run build && npm start",
+    "test": "cd bi-mcp-server && npm test",
+    "test:integration": "node scripts/integration-tests.js",
+    "test:connection": "node scripts/test-connection.js",
+    "deploy": "./scripts/deploy-snowflake.sh",
+    "deploy:verify": "./scripts/deploy-snowflake.sh && npm run test:integration",
+    "validate": "npm run test:connection && npm run test",
+    "validate:victory": "node scripts/victory-audit.js",
+    "load-test": "node scripts/load-test.js",
+    "load-test:quick": "TEST_DURATION=30 CONCURRENT_USERS=50 node scripts/load-test.js",
+    "load-test:full": "TEST_DURATION=300 CONCURRENT_USERS=1000 node scripts/load-test.js",
+    "benchmark": "cd bi-mcp-server && npm run benchmark",
+    "clean": "rm -rf bi-mcp-server/dist node_modules/*/node_modules",
+    "setup": "npm install && cd bi-mcp-server && npm install && cd .. && npm run build",
+    "prepare": "husky"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "snowflake",
+    "activityschema",
+    "claude-desktop",
+    "mcp",
+    "bi",
+    "analytics"
+  ],
+  "author": "Claude Desktop BI Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "dotenv": "^17.2.1"
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "snowflake-sdk": "^2.1.3"
+  },
+  "devDependencies": {
+    "autocannon": "^8.0.0",
+    "husky": "^9.1.7"
   }
 }

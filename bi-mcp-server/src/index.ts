@@ -7,16 +7,16 @@ import {
 import { z } from 'zod';
 import pino from 'pino';
 import { v4 as uuidv4 } from 'uuid';
-import snowflake from 'snowflake-sdk';
-
 import { loadConfig } from './config.js';
 import { NDJSONQueue } from './queue/ndjson-queue.js';
 import { ContextCache } from './cache/context-cache.js';
 import { TicketManager } from './query/ticket-manager.js';
 import {
   validateAllTemplates,
+  TEMPLATE_NAMES,
 } from './sql/safe-templates.js';
 import { generateQueryTag } from './utils/query-tag.js';
+import { SnowflakeClient } from './db/snowflake-client.js';
 
 // Initialize logger
 const logger = pino.default({
@@ -31,7 +31,7 @@ const config = loadConfig();
 let queue: NDJSONQueue;
 let cache: ContextCache;
 let ticketManager: TicketManager;
-let snowflakeConnection: any = null;
+let snowflakeClient: SnowflakeClient;
 
 // Performance metrics
 const metrics = {
@@ -181,8 +181,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_context': {
         const params = getContextSchema.parse(args);
         
-        // Get from ultra-fast cache
-        const context = await cache.get(params.customer_id);
+        // First try ultra-fast memory cache
+        let context = await cache.get(params.customer_id);
+        
+        // If miss, try Snowflake (with strict timeout)
+        if (!context && snowflakeClient) {
+          const sfContext = await snowflakeClient.getContextFromCache(params.customer_id);
+          if (sfContext) {
+            // Populate cache for next time
+            context = {
+              context: sfContext,
+              updated_at: new Date().toISOString(),
+            };
+            await cache.set(params.customer_id, context);
+          }
+        }
         
         recordMetric('getContext', startTime);
         
@@ -228,13 +241,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Generate query tag for this SQL execution
         const queryTag = generateQueryTag();
         
-        // Create ticket and return immediately
-        const ticketId = ticketManager.createTicket(
-          params.template,
-          params.params,
-          params.byte_cap,
-          queryTag
-        );
+        // Create ticket
+        const ticket = ticketManager.createTicket({
+          template: params.template,
+          params: params.params,
+          byte_cap: params.byte_cap,
+        });
+        
+        // Execute async if Snowflake is available
+        if (snowflakeClient) {
+          // Fire and forget - execute in background
+          snowflakeClient.executeTemplate(
+            params.template,
+            params.params,
+            { queryTag, timeout: 30000 }
+          ).then(result => {
+            ticketManager.updateStatus(ticket.id, 'completed', result);
+          }).catch(error => {
+            ticketManager.updateStatus(ticket.id, 'failed', { error: error.message });
+          });
+        } else {
+          // No Snowflake - mark as pending
+          ticketManager.updateStatus(ticket.id, 'failed', { 
+            error: 'Snowflake not connected' 
+          });
+        }
         
         // Log the SQL execution activity
         await queue.write({
@@ -243,7 +274,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           customer: process.env.CUSTOMER_ID || 'default_customer',
           feature_json: {
             template: params.template,
-            ticket_id: ticketId,
+            ticket_id: ticket.id,
           },
           session_id: process.env.SESSION_ID,
           query_tag: queryTag,
@@ -255,7 +286,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ ticket_id: ticketId }),
+              text: JSON.stringify({ ticket_id: ticket.id }),
             },
           ],
         };
@@ -352,38 +383,24 @@ function recordMetric(tool: string, startTime: bigint): void {
   }
 }
 
-// Initialize Snowflake connection
+// Initialize Snowflake connection pool
 async function initSnowflake(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    snowflakeConnection = snowflake.createConnection({
-      account: config.snowflake.account,
-      username: config.snowflake.username,
-      password: config.snowflake.password,
-      warehouse: config.snowflake.warehouse,
-      database: config.snowflake.database,
-      schema: config.snowflake.schema,
-      role: config.snowflake.role,
-    });
-
-    snowflakeConnection.connect((err: any) => {
-      if (err) {
-        logger.error({ err }, 'Failed to connect to Snowflake');
-        reject(err);
-      } else {
-        logger.info('Connected to Snowflake');
-        
-        // Set initial query tag for this session
-        const sessionQueryTag = generateQueryTag();
-        snowflakeConnection.execute({
-          sqlText: `ALTER SESSION SET QUERY_TAG = '${sessionQueryTag}'`,
-          complete: () => {
-            logger.info({ queryTag: sessionQueryTag }, 'Snowflake session query tag set');
-            resolve();
-          },
-        });
-      }
-    });
-  });
+  try {
+    snowflakeClient = new SnowflakeClient(config, 20); // 20 connection pool for better concurrency
+    await snowflakeClient.initialize();
+    logger.info('Snowflake client initialized with connection pool');
+    
+    // Test connection with health check
+    const health = await snowflakeClient.executeTemplate(
+      TEMPLATE_NAMES.CHECK_HEALTH,
+      [],
+      { timeout: 5000 }
+    );
+    logger.info({ health }, 'Snowflake health check passed');
+  } catch (error) {
+    logger.error({ error }, 'Failed to initialize Snowflake client');
+    throw error;
+  }
 }
 
 // Main initialization
@@ -416,7 +433,7 @@ async function main() {
     );
     logger.info('Context cache initialized');
     
-    ticketManager = new TicketManager(5);
+    ticketManager = new TicketManager();
     logger.info('Ticket manager initialized');
     
     // Initialize Snowflake if credentials provided
@@ -456,8 +473,8 @@ process.on('SIGINT', async () => {
     await queue.close();
     await cache.close();
     
-    if (snowflakeConnection) {
-      snowflakeConnection.destroy();
+    if (snowflakeClient) {
+      await snowflakeClient.close();
     }
     
     process.exit(0);
