@@ -26,7 +26,9 @@ export declare class TicketManager {
     private processing;
     private maxConcurrent;
     private activeQueries;
+    private snowflakeClient;
     constructor(maxConcurrent?: number);
+    setSnowflakeClient(client: any): void;
     createTicket(options: {
         template: string;
         params: any[];

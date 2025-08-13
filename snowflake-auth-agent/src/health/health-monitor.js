@@ -1,14 +1,20 @@
+"use strict";
 /**
  * Health Monitor for Snowflake Authentication System
  *
  * Continuously monitors account health, detects lockouts,
  * and provides real-time status reporting.
  */
-import pino from 'pino';
-import { EventEmitter } from 'events';
-import { CircuitState } from '../circuit-breaker/auth-circuit-breaker.js';
-const logger = pino({ name: 'health-monitor' });
-export class HealthMonitor extends EventEmitter {
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.HealthMonitor = void 0;
+const pino_1 = __importDefault(require("pino"));
+const events_1 = require("events");
+const auth_circuit_breaker_1 = require("../circuit-breaker/auth-circuit-breaker");
+const logger = (0, pino_1.default)({ name: 'health-monitor' });
+class HealthMonitor extends events_1.EventEmitter {
     config;
     credentialVault;
     circuitBreaker;
@@ -180,7 +186,7 @@ export class HealthMonitor extends EventEmitter {
         const healthAssessments = [];
         for (const account of accountConfigs) {
             const circuitMetric = circuitMetrics[account.username] || {
-                state: CircuitState.CLOSED,
+                state: auth_circuit_breaker_1.CircuitState.CLOSED,
                 failureCount: 0,
                 successCount: 0,
                 totalAttempts: 0,
@@ -219,12 +225,12 @@ export class HealthMonitor extends EventEmitter {
         }
         else {
             // Check circuit breaker state
-            if (circuitMetric.state === CircuitState.OPEN) {
+            if (circuitMetric.state === auth_circuit_breaker_1.CircuitState.OPEN) {
                 status = 'critical';
                 healthScore = Math.min(healthScore, 20);
                 issues.push('Circuit breaker is open');
             }
-            else if (circuitMetric.state === CircuitState.HALF_OPEN) {
+            else if (circuitMetric.state === auth_circuit_breaker_1.CircuitState.HALF_OPEN) {
                 status = 'degraded';
                 healthScore = Math.min(healthScore, 60);
                 issues.push('Circuit breaker is half-open');
@@ -348,7 +354,7 @@ export class HealthMonitor extends EventEmitter {
         // Account-specific recommendations
         for (const account of accountHealths) {
             if (account.status === 'critical') {
-                if (account.circuitState === CircuitState.OPEN) {
+                if (account.circuitState === auth_circuit_breaker_1.CircuitState.OPEN) {
                     recommendations.push(`Reset circuit breaker for ${account.username} or wait for automatic recovery.`);
                 }
                 if (account.connectionPool.healthy === 0 && account.connectionPool.total > 0) {
@@ -377,7 +383,7 @@ export class HealthMonitor extends EventEmitter {
         // Account-specific alerts
         for (const account of healthStatus.accounts) {
             if (account.status === 'critical' && account.isAvailable === false) {
-                if (account.circuitState === CircuitState.OPEN) {
+                if (account.circuitState === auth_circuit_breaker_1.CircuitState.OPEN) {
                     this.emitAlert('error', 'circuit_open', `Circuit breaker open for account ${account.username}`, account.username, { account });
                 }
                 if (account.connectionPool.healthy === 0) {
@@ -417,7 +423,7 @@ export class HealthMonitor extends EventEmitter {
     setupEventListeners() {
         // Listen to circuit breaker events
         this.circuitBreaker.on('stateChange', ({ accountName, newState }) => {
-            if (newState === CircuitState.OPEN) {
+            if (newState === auth_circuit_breaker_1.CircuitState.OPEN) {
                 this.emitAlert('warning', 'circuit_open', `Circuit breaker opened for account ${accountName}`, accountName);
             }
         });
@@ -430,4 +436,5 @@ export class HealthMonitor extends EventEmitter {
         });
     }
 }
+exports.HealthMonitor = HealthMonitor;
 //# sourceMappingURL=health-monitor.js.map

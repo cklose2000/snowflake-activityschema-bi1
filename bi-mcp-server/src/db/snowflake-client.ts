@@ -78,6 +78,9 @@ export class SnowflakeClient {
         clientSessionKeepAliveHeartbeatFrequency: this.config.performance.connectionHeartbeat || 300, // 5 minutes default
         jsTreatIntegerAsBigInt: false,
         timeout: this.config.performance.connectionTimeout || 5000, // 5 seconds for connection
+        // Performance optimizations for < 25ms latency
+        resultPrefetch: 2, // Prefetch result sets
+        arrayBindingThreshold: 5, // Use array binding for batch queries
       });
 
       conn.connect((err) => {
@@ -88,14 +91,25 @@ export class SnowflakeClient {
           logger.info({ index }, 'Connection created');
           this.connections.push(conn);
           
-          // Set query tag for all queries from this connection
+          // Set query tag and enable result caching for all queries
           conn.execute({
             sqlText: `ALTER SESSION SET QUERY_TAG = 'cdesk_pool_${index}'`,
             complete: (err) => {
               if (err) {
                 logger.error({ err, index }, 'Failed to set query tag');
               }
-              resolve();
+              // Enable query result caching for < 25ms latency
+              conn.execute({
+                sqlText: 'ALTER SESSION SET USE_CACHED_RESULT = TRUE',
+                complete: (err2) => {
+                  if (err2) {
+                    logger.warn({ err: err2 }, 'Failed to enable result caching');
+                  } else {
+                    logger.info({ index }, 'Query result caching enabled');
+                  }
+                  resolve();
+                },
+              });
             },
           });
         }
@@ -418,6 +432,24 @@ export class SnowflakeClient {
     } catch (error) {
       logger.error({ error, customerId }, 'Failed to get context');
       return null;
+    }
+  }
+
+  async executeRawQuery(query: string, params?: any[]): Promise<QueryResult> {
+    const conn = await this.getConnection(true); // Prefer read connection for raw queries
+    const start = performance.now();
+    
+    try {
+      const rows = await this.executeRaw(conn, query, params);
+      const executionTime = performance.now() - start;
+      
+      return {
+        rows: rows || [],
+        rowCount: rows?.length || 0,
+        executionTime,
+      };
+    } finally {
+      this.releaseConnection(conn);
     }
   }
 

@@ -8,6 +8,7 @@ import { loadConfig } from './config.js';
 import { NDJSONQueue } from './queue/ndjson-queue.js';
 import { ContextCache } from './cache/context-cache.js';
 import { TicketManager } from './query/ticket-manager.js';
+import { InsightAtoms } from './memory/insight-atoms.js';
 import { validateAllTemplates, TEMPLATE_NAMES, } from './sql/safe-templates.js';
 import { generateQueryTag } from './utils/query-tag.js';
 import { SnowflakeClient } from './db/snowflake-client.js';
@@ -23,6 +24,7 @@ const config = loadConfig();
 let queue;
 let cache;
 let ticketManager;
+let insightAtoms;
 let snowflakeClient;
 // Performance metrics
 const metrics = {
@@ -299,13 +301,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case 'log_insight': {
                 const params = logInsightSchema.parse(args);
-                // Fire-and-forget to NDJSON queue for insight atom
-                const atomId = uuidv4();
+                const customerId = process.env.CUSTOMER_ID || 'default_customer';
+                // Store insight atom with structured memory system
+                const atomId = await insightAtoms.record(customerId, params.subject, params.metric, params.value, params.provenance_query_hash);
+                // Also log the activity to NDJSON queue for audit trail
                 const queryTag = generateQueryTag();
                 await queue.write({
                     activity_id: uuidv4(),
                     activity: 'cdesk.insight_recorded',
-                    customer: process.env.CUSTOMER_ID || 'default_customer',
+                    customer: customerId,
                     feature_json: {
                         atom_id: atomId,
                         subject: params.subject,
@@ -321,7 +325,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     content: [
                         {
                             type: 'text',
-                            text: 'Insight logged successfully',
+                            text: JSON.stringify({
+                                success: true,
+                                atom_id: atomId,
+                                message: 'Insight atom recorded successfully'
+                            }),
                         },
                     ],
                 };
@@ -529,9 +537,17 @@ async function main() {
         // Initialize Snowflake if credentials provided
         if (config.snowflake.password) {
             await initSnowflake();
+            // Connect ticket manager to Snowflake client
+            ticketManager.setSnowflakeClient(snowflakeClient);
+            // Initialize insight atoms with Snowflake client
+            insightAtoms = new InsightAtoms(snowflakeClient);
+            logger.info('Insight atoms initialized with Snowflake backend');
         }
         else {
             logger.warn('Snowflake password not provided - running in offline mode');
+            // Initialize insight atoms without Snowflake (local cache only)
+            insightAtoms = new InsightAtoms();
+            logger.info('Insight atoms initialized in offline mode');
         }
         // Start server
         const transport = new StdioServerTransport();
@@ -544,6 +560,7 @@ async function main() {
                 cache: cache.getMetrics(),
                 queue: queue.getStats(),
                 tickets: ticketManager.getStats(),
+                insights: insightAtoms.getStats(),
             }, 'Performance metrics');
         }, 30000);
         // Proactive cache refresh for hot users

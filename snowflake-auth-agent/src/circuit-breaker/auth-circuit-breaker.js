@@ -1,19 +1,25 @@
+"use strict";
 /**
  * Authentication Circuit Breaker
  *
  * Prevents cascading failures by tracking authentication attempts,
  * implementing exponential backoff, and managing account failover.
  */
-import pino from 'pino';
-import { EventEmitter } from 'events';
-const logger = pino({ name: 'auth-circuit-breaker' });
-export var CircuitState;
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AuthCircuitBreaker = exports.CircuitState = void 0;
+const pino_1 = __importDefault(require("pino"));
+const events_1 = require("events");
+const logger = (0, pino_1.default)({ name: 'auth-circuit-breaker' });
+var CircuitState;
 (function (CircuitState) {
     CircuitState["CLOSED"] = "closed";
     CircuitState["OPEN"] = "open";
     CircuitState["HALF_OPEN"] = "half-open"; // Testing if recovered
-})(CircuitState || (CircuitState = {}));
-export class AuthCircuitBreaker extends EventEmitter {
+})(CircuitState || (exports.CircuitState = CircuitState = {}));
+class AuthCircuitBreaker extends events_1.EventEmitter {
     config;
     metrics = new Map();
     cleanupInterval;
@@ -292,4 +298,5 @@ export class AuthCircuitBreaker extends EventEmitter {
         }
     }
 }
+exports.AuthCircuitBreaker = AuthCircuitBreaker;
 //# sourceMappingURL=auth-circuit-breaker.js.map

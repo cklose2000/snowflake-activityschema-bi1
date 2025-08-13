@@ -2,12 +2,14 @@
   "name": "snowflake-auth-agent",
   "version": "1.0.0",
   "description": "Smart Snowflake Authentication Agent with Anti-Lockout Protection",
-  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "test": "jest",
+    "test:unit": "jest tests/unit",
+    "test:performance": "jest tests/performance --testTimeout=60000",
+    "test:coverage": "jest --coverage",
     "test:watch": "jest --watch",
     "lint": "eslint src/**/*.ts",
     "start": "node dist/index.js"
@@ -15,7 +17,7 @@
   "keywords": [
     "snowflake",
     "authentication",
-    "circuit-breaker", 
+    "circuit-breaker",
     "failover",
     "mcp"
   ],
@@ -23,20 +25,23 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.4.0",
-    "snowflake-sdk": "^1.11.0",
-    "pino": "^8.17.2",
     "crypto": "^1.0.1",
+    "pino": "^8.17.2",
+    "redis": "^4.6.12",
+    "snowflake-sdk": "^1.11.0",
     "uuid": "^9.0.1",
-    "zod": "^3.22.4",
-    "redis": "^4.6.12"
+    "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.10.6",
     "@types/uuid": "^9.0.7",
     "@typescript-eslint/eslint-plugin": "^6.18.0",
     "@typescript-eslint/parser": "^6.18.0",
+    "dotenv": "^17.2.1",
     "eslint": "^8.56.0",
     "jest": "^29.7.0",
+    "ts-jest": "^29.4.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }

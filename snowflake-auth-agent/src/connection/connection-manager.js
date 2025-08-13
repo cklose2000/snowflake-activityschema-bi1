@@ -1,14 +1,67 @@
+"use strict";
 /**
  * Smart Connection Manager for Snowflake
  *
  * Manages connection pools per account with intelligent failover,
  * connection reuse, and health monitoring to minimize authentication attempts.
  */
-import snowflake from 'snowflake-sdk';
-import pino from 'pino';
-import { EventEmitter } from 'events';
-const logger = pino({ name: 'connection-manager' });
-export class ConnectionManager extends EventEmitter {
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ConnectionManager = void 0;
+const snowflake_sdk_1 = __importDefault(require("snowflake-sdk"));
+const pino_1 = __importDefault(require("pino"));
+const events_1 = require("events");
+const uuid_1 = require("uuid");
+const logger = (0, pino_1.default)({ name: 'connection-manager' });
+// Auth event logging function (will write to AUTH_EVENTS table)
+async function logAuthEvent(connection, accountName, eventType, success, errorMessage, metadata) {
+    try {
+        if (connection) {
+            const eventId = (0, uuid_1.v4)().substring(0, 8);
+            // Use fully qualified table name
+            const query = `
+        INSERT INTO CLAUDE_LOGS.ACTIVITIES.AUTH_EVENTS (
+          event_id, account_name, event_type, error_message,
+          source_ip, user_agent, connection_id, ts
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP())
+      `;
+            logger.info({ eventId, accountName, eventType }, 'Attempting to log auth event');
+            await new Promise((resolve, reject) => {
+                connection.execute({
+                    sqlText: query,
+                    binds: [
+                        eventId,
+                        accountName,
+                        eventType,
+                        errorMessage || null,
+                        null, // source_ip
+                        null, // user_agent
+                        metadata?.connectionId || null // connection_id from metadata
+                    ],
+                    complete: (err, stmt, rows) => {
+                        if (err) {
+                            logger.warn({ error: err, accountName, eventType, query }, 'Failed to log auth event');
+                            resolve(null); // Don't fail on logging errors
+                        }
+                        else {
+                            logger.info({ accountName, eventType, success, eventId, rowCount: stmt?.getNumRowsAffected?.() }, 'Auth event logged successfully');
+                            resolve(null);
+                        }
+                    }
+                });
+            });
+        }
+        else {
+            logger.debug({ accountName, eventType }, 'No connection available for logging auth event');
+        }
+    }
+    catch (error) {
+        logger.warn({ error, accountName, eventType }, 'Error logging auth event');
+    }
+}
+class ConnectionManager extends events_1.EventEmitter {
     config;
     credentialVault;
     circuitBreaker;
@@ -85,11 +138,20 @@ export class ConnectionManager extends EventEmitter {
                 username: account.username,
                 circuitState: this.circuitBreaker.getAccountMetrics(account.username).state,
             }, 'Circuit breaker preventing connection attempt');
+            // Log circuit breaker blocking
+            const pool = this.pools.get(account.username);
+            if (pool && pool.connections.length > 0) {
+                await logAuthEvent(pool.connections[0], account.username, 'circuit_breaker_blocked', false, 'Circuit breaker is open', { state: this.circuitBreaker.getAccountMetrics(account.username).state });
+            }
             throw new Error(`Circuit breaker open for account ${account.username}`);
         }
         try {
             const result = await this.getConnectionFromAccount(account.username);
             if (result) {
+                // Log successful failover if this wasn't the preferred account
+                if (preferredAccount && preferredAccount !== account.username) {
+                    await logAuthEvent(result.connection, account.username, 'failover_success', true, undefined, { from: preferredAccount, to: account.username });
+                }
                 return result;
             }
             throw new Error('No healthy connections available');
@@ -99,6 +161,11 @@ export class ConnectionManager extends EventEmitter {
                 error,
                 username: account.username,
             }, 'Failed to get connection from account');
+            // Log failover failure
+            const pool = this.pools.get(account.username);
+            if (pool && pool.connections.length > 0) {
+                await logAuthEvent(pool.connections[0], account.username, 'failover_failed', false, error instanceof Error ? error.message : 'Unknown error', { attemptedAccount: account.username });
+            }
             await this.circuitBreaker.recordFailure(account.username, error instanceof Error ? error.message : 'Unknown error');
             throw error;
         }
@@ -217,6 +284,8 @@ export class ConnectionManager extends EventEmitter {
                 pool.healthyConnections.add(newConnection);
                 pool.activeConnections.add(newConnection);
                 pool.totalCreated++;
+                // Log successful connection creation
+                await logAuthEvent(newConnection, username, 'connection_created', true, undefined, { poolSize: pool.connections.length, maxSize: pool.maxSize });
                 logger.info({
                     username,
                     totalConnections: pool.connections.length,
@@ -229,6 +298,8 @@ export class ConnectionManager extends EventEmitter {
                 return { connection: newConnection, account: pool.account };
             }
             catch (error) {
+                // Log connection failure
+                await logAuthEvent(null, username, 'connection_failed', false, error instanceof Error ? error.message : 'Unknown error', { poolSize: pool.connections.length });
                 logger.error({
                     error,
                     username,
@@ -302,7 +373,7 @@ export class ConnectionManager extends EventEmitter {
             const timeout = setTimeout(() => {
                 reject(new Error(`Connection timeout after ${this.config.connectionTimeout}ms`));
             }, this.config.connectionTimeout);
-            const connection = snowflake.createConnection({
+            const connection = snowflake_sdk_1.default.createConnection({
                 account: account.account,
                 username: account.username,
                 password: account.password,
@@ -446,4 +517,5 @@ export class ConnectionManager extends EventEmitter {
         }, 'Pool health check completed');
     }
 }
+exports.ConnectionManager = ConnectionManager;
 //# sourceMappingURL=connection-manager.js.map

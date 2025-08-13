@@ -8,11 +8,11 @@
 import pino from 'pino';
 import { resolve } from 'path';
 
-import { CredentialVault } from './credential/credential-vault.js';
-import { AuthCircuitBreaker } from './circuit-breaker/auth-circuit-breaker.js';
-import { ConnectionManager } from './connection/connection-manager.js';
-import { HealthMonitor } from './health/health-monitor.js';
-import { AuthAgentServer } from './mcp/auth-agent-server.js';
+import { CredentialVault } from './credential/credential-vault';
+import { AuthCircuitBreaker } from './circuit-breaker/auth-circuit-breaker';
+import { ConnectionManager } from './connection/connection-manager';
+import { HealthMonitor } from './health/health-monitor';
+import { AuthAgentServer } from './mcp/auth-agent-server';
 
 const logger = pino({ 
   name: 'snowflake-auth-agent',
@@ -311,7 +311,7 @@ async function main() {
 }
 
 // Start the agent if this file is run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (require.main === module) {
   main().catch((error) => {
     logger.fatal({ error }, 'Fatal error in main');
     process.exit(1);

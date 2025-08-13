@@ -11,13 +11,13 @@ import { loadConfig } from './config.js';
 import { NDJSONQueue } from './queue/ndjson-queue.js';
 import { ContextCache } from './cache/context-cache.js';
 import { TicketManager } from './query/ticket-manager.js';
+import { InsightAtoms } from './memory/insight-atoms.js';
 import {
   validateAllTemplates,
   TEMPLATE_NAMES,
 } from './sql/safe-templates.js';
 import { generateQueryTag } from './utils/query-tag.js';
 import { SnowflakeClient } from './db/snowflake-client.js';
-import { AuthEnabledSnowflakeClient } from './db/auth-enabled-snowflake-client.js';
 
 // Initialize logger
 const logger = pino.default({
@@ -32,7 +32,8 @@ const config = loadConfig();
 let queue: NDJSONQueue;
 let cache: ContextCache;
 let ticketManager: TicketManager;
-let snowflakeClient: SnowflakeClient | AuthEnabledSnowflakeClient;
+let insightAtoms: InsightAtoms;
+let snowflakeClient: SnowflakeClient | any;
 
 // Performance metrics
 const metrics = {
@@ -182,7 +183,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const useAuthAgent = process.env.AUTH_AGENT_ENABLED === 'true' || process.env.AUTH_AGENT_ENABLED === '1';
   if (useAuthAgent && snowflakeClient && 'logToolExecution' in snowflakeClient) {
     // Log tool execution start (async, non-blocking)
-    (snowflakeClient as AuthEnabledSnowflakeClient).logToolExecution(name, 'start').catch(err => {
+    snowflakeClient.logToolExecution(name, 'start').catch((err: any) => {
       logger.warn({ error: err, tool: name }, 'Failed to log tool execution start');
     });
   }
@@ -215,7 +216,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         // Log tool success if using auth agent
         if (useAuthAgent && snowflakeClient && 'logToolExecution' in snowflakeClient) {
-          (snowflakeClient as AuthEnabledSnowflakeClient).logToolExecution(name, 'success').catch(err => {
+          snowflakeClient.logToolExecution(name, 'success').catch((err: any) => {
             logger.warn({ error: err, tool: name }, 'Failed to log tool execution success');
           });
         }
@@ -307,9 +308,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             params.template,
             params.params,
             { queryTag, timeout: 30000 }
-          ).then(result => {
+          ).then((result: any) => {
             ticketManager.updateStatus(ticket.id, 'completed', result);
-          }).catch(error => {
+          }).catch((error: any) => {
             ticketManager.updateStatus(ticket.id, 'failed', { error: error.message });
           });
         } else {
@@ -346,15 +347,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'log_insight': {
         const params = logInsightSchema.parse(args);
+        const customerId = process.env.CUSTOMER_ID || 'default_customer';
         
-        // Fire-and-forget to NDJSON queue for insight atom
-        const atomId = uuidv4();
+        // Store insight atom with structured memory system
+        const atomId = await insightAtoms.record(
+          customerId,
+          params.subject,
+          params.metric,
+          params.value,
+          params.provenance_query_hash
+        );
+        
+        // Also log the activity to NDJSON queue for audit trail
         const queryTag = generateQueryTag();
-        
         await queue.write({
           activity_id: uuidv4(),
           activity: 'cdesk.insight_recorded',
-          customer: process.env.CUSTOMER_ID || 'default_customer',
+          customer: customerId,
           feature_json: {
             atom_id: atomId,
             subject: params.subject,
@@ -372,7 +381,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: 'Insight logged successfully',
+              text: JSON.stringify({ 
+                success: true,
+                atom_id: atomId,
+                message: 'Insight atom recorded successfully'
+              }),
             },
           ],
         };
@@ -394,7 +407,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const systemHealth = await (snowflakeClient as AuthEnabledSnowflakeClient).getSystemHealth();
+        const systemHealth = await snowflakeClient.getSystemHealth();
         const includeDetails = args?.include_details !== false;
         
         const response = {
@@ -436,7 +449,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new Error('Username is required');
         }
 
-        const success = await (snowflakeClient as AuthEnabledSnowflakeClient).unlockAccount(username);
+        const success = await snowflakeClient.unlockAccount(username);
         
         recordMetric('unlockAccount', startTime);
         
@@ -465,10 +478,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const force = args?.force === true;
         
         // Refresh connection pools to trigger rotation
-        await (snowflakeClient as AuthEnabledSnowflakeClient).refreshConnections();
+        await snowflakeClient.refreshConnections();
         
         // Get updated system health to show new active account
-        const systemHealth = await (snowflakeClient as AuthEnabledSnowflakeClient).getSystemHealth();
+        const systemHealth = await snowflakeClient.getSystemHealth();
         const activeAccounts = systemHealth.accounts?.filter((acc: any) => acc.isAvailable) || [];
         
         recordMetric('rotateCredentials', startTime);
@@ -502,7 +515,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     
     // Log tool failure if using auth agent
     if (useAuthAgent && snowflakeClient && 'logToolExecution' in snowflakeClient) {
-      (snowflakeClient as AuthEnabledSnowflakeClient).logToolExecution(name, 'failure', error.message).catch(err => {
+      snowflakeClient.logToolExecution(name, 'failure', error.message).catch((err: any) => {
         logger.warn({ error: err, tool: name }, 'Failed to log tool execution failure');
       });
     }
@@ -561,6 +574,7 @@ async function initSnowflake(): Promise<void> {
     
     if (useAuthAgent) {
       logger.info('Initializing with Auth-Enabled Snowflake client');
+      const { AuthEnabledSnowflakeClient } = await import('./db/auth-enabled-snowflake-client.js');
       snowflakeClient = new AuthEnabledSnowflakeClient(config);
     } else {
       logger.info('Initializing with standard Snowflake client');
@@ -580,7 +594,7 @@ async function initSnowflake(): Promise<void> {
     
     // Log system health if using auth agent
     if (useAuthAgent && 'getSystemHealth' in snowflakeClient) {
-      const systemHealth = await (snowflakeClient as AuthEnabledSnowflakeClient).getSystemHealth();
+      const systemHealth = await snowflakeClient.getSystemHealth();
       logger.info({
         overall: systemHealth.overall,
         accounts: systemHealth.accounts?.length || 0,
@@ -630,8 +644,19 @@ async function main() {
     // Initialize Snowflake if credentials provided
     if (config.snowflake.password) {
       await initSnowflake();
+      
+      // Connect ticket manager to Snowflake client
+      ticketManager.setSnowflakeClient(snowflakeClient);
+      
+      // Initialize insight atoms with Snowflake client
+      insightAtoms = new InsightAtoms(snowflakeClient as SnowflakeClient);
+      logger.info('Insight atoms initialized with Snowflake backend');
     } else {
       logger.warn('Snowflake password not provided - running in offline mode');
+      
+      // Initialize insight atoms without Snowflake (local cache only)
+      insightAtoms = new InsightAtoms();
+      logger.info('Insight atoms initialized in offline mode');
     }
     
     // Start server
@@ -647,6 +672,7 @@ async function main() {
         cache: cache.getMetrics(),
         queue: queue.getStats(),
         tickets: ticketManager.getStats(),
+        insights: insightAtoms.getStats(),
       }, 'Performance metrics');
     }, 30000);
     

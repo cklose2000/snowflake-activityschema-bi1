@@ -15,12 +15,16 @@ export class TicketManager {
     processing = false;
     maxConcurrent = 5;
     activeQueries = 0;
+    snowflakeClient = null; // Will be set after initialization
     constructor(maxConcurrent = 5) {
         this.maxConcurrent = maxConcurrent;
         // Clean up old tickets periodically
         setInterval(() => {
             this.cleanupOldTickets();
         }, 60000); // Every minute
+    }
+    setSnowflakeClient(client) {
+        this.snowflakeClient = client;
     }
     createTicket(options) {
         const ticketId = uuidv4();
@@ -129,17 +133,62 @@ export class TicketManager {
         }
     }
     async executeQuery(ticket) {
-        // This would execute the actual query using SafeSQL templates
-        // For now, this is a placeholder
-        logger.info({ ticketId: ticket.ticket_id }, 'Executing query');
-        // Simulate query execution
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        // Update ticket with results
-        this.updateTicket(ticket.ticket_id, {
-            status: TicketStatus.COMPLETED,
-            result: { rows: [], rowCount: 0 },
-            progress: 100,
-        });
+        logger.info({ ticketId: ticket.ticket_id, template: ticket.template }, 'Executing query');
+        try {
+            if (!this.snowflakeClient) {
+                throw new Error('Snowflake client not available');
+            }
+            // Execute the query using SafeSQL templates
+            const result = await this.snowflakeClient.executeTemplate(ticket.template, ticket.params, {
+                timeout: 30000,
+                queryTag: `ticket_${ticket.ticket_id.substring(0, 8)}`,
+            });
+            let finalResult = result;
+            // Apply byte cap if specified
+            if (ticket.byte_cap && result.rows) {
+                const serialized = JSON.stringify(result.rows);
+                if (serialized.length > ticket.byte_cap) {
+                    // Truncate results to fit within byte cap
+                    const truncatedRows = [];
+                    let currentSize = 0;
+                    for (const row of result.rows) {
+                        const rowSize = JSON.stringify(row).length;
+                        if (currentSize + rowSize > ticket.byte_cap - 200) { // Reserve 200 bytes for metadata
+                            break;
+                        }
+                        truncatedRows.push(row);
+                        currentSize += rowSize;
+                    }
+                    finalResult = {
+                        ...result,
+                        rows: truncatedRows,
+                        truncated: true,
+                        original_row_count: result.rows.length,
+                        returned_row_count: truncatedRows.length,
+                    };
+                }
+            }
+            // Update ticket with successful results
+            this.updateTicket(ticket.ticket_id, {
+                status: TicketStatus.COMPLETED,
+                result: finalResult,
+                progress: 100,
+                byte_count: JSON.stringify(finalResult).length,
+            });
+            logger.info({
+                ticketId: ticket.ticket_id,
+                rowCount: finalResult.rows?.length || 0,
+                executionTime: finalResult.executionTime
+            }, 'Query completed successfully');
+        }
+        catch (error) {
+            logger.error({ error: error.message, ticketId: ticket.ticket_id }, 'Query execution failed');
+            this.updateTicket(ticket.ticket_id, {
+                status: TicketStatus.FAILED,
+                error: error.message,
+                progress: 0,
+            });
+        }
     }
     cleanupOldTickets() {
         const cutoffTime = Date.now() - 3600000; // 1 hour

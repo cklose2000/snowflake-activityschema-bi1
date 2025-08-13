@@ -33,6 +33,7 @@ export class TicketManager {
   private processing: boolean = false;
   private maxConcurrent: number = 5;
   private activeQueries: number = 0;
+  private snowflakeClient: any = null; // Will be set after initialization
 
   constructor(maxConcurrent: number = 5) {
     this.maxConcurrent = maxConcurrent;
@@ -41,6 +42,10 @@ export class TicketManager {
     setInterval(() => {
       this.cleanupOldTickets();
     }, 60000); // Every minute
+  }
+
+  setSnowflakeClient(client: any): void {
+    this.snowflakeClient = client;
   }
 
   createTicket(options: { template: string; params: any[]; byte_cap?: number }): { id: string; status: TicketStatus } {
@@ -168,19 +173,75 @@ export class TicketManager {
   }
 
   private async executeQuery(ticket: QueryTicket): Promise<void> {
-    // This would execute the actual query using SafeSQL templates
-    // For now, this is a placeholder
-    logger.info({ ticketId: ticket.ticket_id }, 'Executing query');
+    logger.info({ ticketId: ticket.ticket_id, template: ticket.template }, 'Executing query');
     
-    // Simulate query execution
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Update ticket with results
-    this.updateTicket(ticket.ticket_id, {
-      status: TicketStatus.COMPLETED,
-      result: { rows: [], rowCount: 0 },
-      progress: 100,
-    });
+    try {
+      if (!this.snowflakeClient) {
+        throw new Error('Snowflake client not available');
+      }
+      
+      // Execute the query using SafeSQL templates
+      const result = await this.snowflakeClient.executeTemplate(
+        ticket.template,
+        ticket.params,
+        { 
+          timeout: 30000,
+          queryTag: `ticket_${ticket.ticket_id.substring(0, 8)}`,
+        }
+      );
+      
+      let finalResult = result;
+      
+      // Apply byte cap if specified
+      if (ticket.byte_cap && result.rows) {
+        const serialized = JSON.stringify(result.rows);
+        if (serialized.length > ticket.byte_cap) {
+          // Truncate results to fit within byte cap
+          const truncatedRows = [];
+          let currentSize = 0;
+          
+          for (const row of result.rows) {
+            const rowSize = JSON.stringify(row).length;
+            if (currentSize + rowSize > ticket.byte_cap - 200) { // Reserve 200 bytes for metadata
+              break;
+            }
+            truncatedRows.push(row);
+            currentSize += rowSize;
+          }
+          
+          finalResult = {
+            ...result,
+            rows: truncatedRows,
+            truncated: true,
+            original_row_count: result.rows.length,
+            returned_row_count: truncatedRows.length,
+          };
+        }
+      }
+      
+      // Update ticket with successful results
+      this.updateTicket(ticket.ticket_id, {
+        status: TicketStatus.COMPLETED,
+        result: finalResult,
+        progress: 100,
+        byte_count: JSON.stringify(finalResult).length,
+      });
+      
+      logger.info({ 
+        ticketId: ticket.ticket_id, 
+        rowCount: finalResult.rows?.length || 0,
+        executionTime: finalResult.executionTime 
+      }, 'Query completed successfully');
+      
+    } catch (error: any) {
+      logger.error({ error: error.message, ticketId: ticket.ticket_id }, 'Query execution failed');
+      
+      this.updateTicket(ticket.ticket_id, {
+        status: TicketStatus.FAILED,
+        error: error.message,
+        progress: 0,
+      });
+    }
   }
 
   private cleanupOldTickets(): void {

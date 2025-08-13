@@ -9,8 +9,8 @@ import snowflake from 'snowflake-sdk';
 import pino from 'pino';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import { CredentialVault, AccountConfig } from '../credential/credential-vault.js';
-import { AuthCircuitBreaker, CircuitState } from '../circuit-breaker/auth-circuit-breaker.js';
+import { CredentialVault, AccountConfig } from '../credential/credential-vault';
+import { AuthCircuitBreaker, CircuitState } from '../circuit-breaker/auth-circuit-breaker';
 
 const logger = pino({ name: 'connection-manager' });
 

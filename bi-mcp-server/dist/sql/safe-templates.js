@@ -30,18 +30,16 @@ SAFE_TEMPLATES.set('LOG_EVENT', {
 });
 SAFE_TEMPLATES.set('LOG_INSIGHT', {
     sql: `INSERT INTO CLAUDE_LOGS.ACTIVITIES.insight_atoms (
-    id, customer, subject, metric, 
-    value, provenance_query_hash, ts
-  ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP())`,
+    id, customer, subject, metric, value
+  ) VALUES (?, ?, ?, ?, PARSE_JSON(?))`,
     validator: (params) => {
-        const [atom_id, customer, subject, metric, value, hash] = params;
+        const [atom_id, customer, subject, metric, value] = params;
         return [
             uuidSchema.parse(atom_id),
             customerIdSchema.parse(customer),
             z.string().min(1).max(255).parse(subject),
             z.string().min(1).max(255).parse(metric),
             JSON.stringify(value),
-            z.string().length(16).parse(hash),
         ];
     },
 });
@@ -130,6 +128,77 @@ SAFE_TEMPLATES.set('RECORD_INGEST_ID', {
         return [uuidSchema.parse(id)];
     },
 });
+// Insight Atoms templates
+SAFE_TEMPLATES.set('GET_INSIGHTS_BY_CUSTOMER', {
+    sql: `SELECT id as atom_id, customer, subject, metric, value, ts
+    FROM CLAUDE_LOGS.ACTIVITIES.insight_atoms
+    WHERE customer = ?
+    ORDER BY ts DESC
+    LIMIT ?`,
+    validator: (params) => {
+        const [customer_id, limit] = params;
+        return [
+            customerIdSchema.parse(customer_id),
+            z.number().int().min(1).max(1000).parse(limit),
+        ];
+    },
+});
+SAFE_TEMPLATES.set('GET_INSIGHTS_BY_SUBJECT', {
+    sql: `SELECT id as atom_id, customer, subject, metric, value, ts
+    FROM CLAUDE_LOGS.ACTIVITIES.insight_atoms
+    WHERE customer = ? AND subject = ?
+    ORDER BY ts DESC
+    LIMIT ?`,
+    validator: (params) => {
+        const [customer_id, subject, limit] = params;
+        return [
+            customerIdSchema.parse(customer_id),
+            z.string().min(1).max(255).parse(subject),
+            z.number().int().min(1).max(1000).parse(limit),
+        ];
+    },
+});
+SAFE_TEMPLATES.set('GET_INSIGHTS_BY_SUBJECT_METRIC', {
+    sql: `SELECT id as atom_id, customer, subject, metric, value, ts
+    FROM CLAUDE_LOGS.ACTIVITIES.insight_atoms
+    WHERE customer = ? AND subject = ? AND metric = ?
+    ORDER BY ts DESC
+    LIMIT ?`,
+    validator: (params) => {
+        const [customer_id, subject, metric, limit] = params;
+        return [
+            customerIdSchema.parse(customer_id),
+            z.string().min(1).max(255).parse(subject),
+            z.string().min(1).max(255).parse(metric),
+            z.number().int().min(1).max(1000).parse(limit),
+        ];
+    },
+});
+// Provenance tracking templates
+SAFE_TEMPLATES.set('LOG_PROVENANCE', {
+    sql: `INSERT INTO CLAUDE_LOGS.ACTIVITIES.provenance_chain (
+    query_hash, template_name, query_text, parameters, created_by, created_at
+  ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP())`,
+    validator: (params) => {
+        const [hash, template_name, query_text, parameters, created_by] = params;
+        return [
+            z.string().length(16).parse(hash),
+            z.string().min(1).max(255).parse(template_name),
+            z.string().min(1).max(10000).parse(query_text),
+            z.string().max(10000).parse(parameters),
+            z.string().min(1).max(255).parse(created_by),
+        ];
+    },
+});
+SAFE_TEMPLATES.set('GET_PROVENANCE', {
+    sql: `SELECT query_hash, template_name, query_text, parameters, created_by, created_at
+    FROM CLAUDE_LOGS.ACTIVITIES.provenance_chain
+    WHERE query_hash = ?`,
+    validator: (params) => {
+        const [hash] = params;
+        return [z.string().length(16).parse(hash)];
+    },
+});
 // Helper to generate query hash for provenance
 export function generateQueryHash(template, params) {
     const normalized = template.replace(/\s+/g, ' ').trim();
@@ -205,5 +274,12 @@ export const TEMPLATE_NAMES = {
     GET_RECENT_ACTIVITIES: 'GET_RECENT_ACTIVITIES',
     GET_ACTIVITY_STATS: 'GET_ACTIVITY_STATS',
     CHECK_HEALTH: 'CHECK_HEALTH',
+    CHECK_INGEST_ID: 'CHECK_INGEST_ID',
+    RECORD_INGEST_ID: 'RECORD_INGEST_ID',
+    GET_INSIGHTS_BY_CUSTOMER: 'GET_INSIGHTS_BY_CUSTOMER',
+    GET_INSIGHTS_BY_SUBJECT: 'GET_INSIGHTS_BY_SUBJECT',
+    GET_INSIGHTS_BY_SUBJECT_METRIC: 'GET_INSIGHTS_BY_SUBJECT_METRIC',
+    LOG_PROVENANCE: 'LOG_PROVENANCE',
+    GET_PROVENANCE: 'GET_PROVENANCE',
 };
 //# sourceMappingURL=safe-templates.js.map

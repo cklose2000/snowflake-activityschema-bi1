@@ -15,11 +15,11 @@ import { z } from 'zod';
 import pino from 'pino';
 import { performance } from 'perf_hooks';
 
-import { CredentialVault } from '../credential/credential-vault.js';
-import { AuthCircuitBreaker } from '../circuit-breaker/auth-circuit-breaker.js';
-import { ConnectionManager } from '../connection/connection-manager.js';
-import { HealthMonitor } from '../health/health-monitor.js';
-import { SAFE_TEMPLATES, validateAllTemplates, TEMPLATE_NAMES } from '../sql/safe-templates.js';
+import { CredentialVault } from '../credential/credential-vault';
+import { AuthCircuitBreaker } from '../circuit-breaker/auth-circuit-breaker';
+import { ConnectionManager } from '../connection/connection-manager';
+import { HealthMonitor } from '../health/health-monitor';
+import { SAFE_TEMPLATES, validateAllTemplates, TEMPLATE_NAMES } from '../sql/safe-templates';
 
 const logger = pino({ name: 'auth-agent-server' });
 

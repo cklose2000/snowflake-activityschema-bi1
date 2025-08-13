@@ -6,8 +6,8 @@
  */
 import snowflake from 'snowflake-sdk';
 import { EventEmitter } from 'events';
-import { CredentialVault, AccountConfig } from '../credential/credential-vault.js';
-import { AuthCircuitBreaker } from '../circuit-breaker/auth-circuit-breaker.js';
+import { CredentialVault, AccountConfig } from '../credential/credential-vault';
+import { AuthCircuitBreaker } from '../circuit-breaker/auth-circuit-breaker';
 export interface ConnectionPool {
     account: AccountConfig;
     connections: snowflake.Connection[];

@@ -7,9 +7,9 @@
 
 import pino from 'pino';
 import { EventEmitter } from 'events';
-import { CredentialVault } from '../credential/credential-vault.js';
-import { AuthCircuitBreaker, CircuitState } from '../circuit-breaker/auth-circuit-breaker.js';
-import { ConnectionManager } from '../connection/connection-manager.js';
+import { CredentialVault } from '../credential/credential-vault';
+import { AuthCircuitBreaker, CircuitState } from '../circuit-breaker/auth-circuit-breaker';
+import { ConnectionManager } from '../connection/connection-manager';
 
 const logger = pino({ name: 'health-monitor' });
 

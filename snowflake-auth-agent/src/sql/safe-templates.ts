@@ -459,3 +459,24 @@ export function validateAllTemplates(): void {
   
   logger.info({ templateCount: SAFE_TEMPLATES.size }, 'All SafeSQL templates validated successfully');
 }
+
+// Get active customers for cache warming
+SAFE_TEMPLATES.set('GET_ACTIVE_CUSTOMERS', {
+  sql: `
+    SELECT DISTINCT customer_id
+    FROM CONTEXT_CACHE
+    WHERE updated_at >= DATEADD(hour, -1, CURRENT_TIMESTAMP())
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `,
+  validator: (params: any[]) => {
+    if (params.length !== 1) {
+      throw new Error('GET_ACTIVE_CUSTOMERS expects exactly 1 parameter');
+    }
+    const limit = validateNumber(params[0], 1, 1000);
+    return [limit];
+  },
+});
+
+// Template names array for validation
+export const TEMPLATE_NAMES_ARRAY = Array.from(SAFE_TEMPLATES.keys());

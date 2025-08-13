@@ -10,11 +10,11 @@ import { Config } from '../config.js';
 import { QueryResult } from './snowflake-client.js';
 import { SAFE_TEMPLATES } from '../sql/safe-templates.js';
 
-// Import auth agent components from built files
-import { CredentialVault } from '../../../snowflake-auth-agent/dist/credential/credential-vault.js';
-import { AuthCircuitBreaker } from '../../../snowflake-auth-agent/dist/circuit-breaker/auth-circuit-breaker.js';
-import { ConnectionManager } from '../../../snowflake-auth-agent/dist/connection/connection-manager.js';
-import { HealthMonitor } from '../../../snowflake-auth-agent/dist/health/health-monitor.js';
+// Import auth agent components from source files
+import { CredentialVault } from '../../../snowflake-auth-agent/src/credential/credential-vault.js';
+import { AuthCircuitBreaker } from '../../../snowflake-auth-agent/src/circuit-breaker/auth-circuit-breaker.js';
+import { ConnectionManager } from '../../../snowflake-auth-agent/src/connection/connection-manager.js';
+import { HealthMonitor } from '../../../snowflake-auth-agent/src/health/health-monitor.js';
 
 // Create a simple logger for now
 const logger = {
